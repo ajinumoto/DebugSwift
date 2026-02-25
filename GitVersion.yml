@@ -1,17 +1,12 @@
 mode: ContinuousDelivery
-next-version: 1.0.0
 assembly-versioning-scheme: MajorMinorPatch
 assembly-file-versioning-scheme: MajorMinorPatchTag
 assembly-informational-format: '{InformationalVersion}'
 tag-prefix: 'v'
-continuous-delivery-fallback-tag: 'ci'
 major-version-bump-message: '\+semver:\s?(breaking|major)'
 minor-version-bump-message: '\+semver:\s?(feature|minor)'
 patch-version-bump-message: '\+semver:\s?(fix|patch)'
 no-bump-message: '\+semver:\s?(none|skip)'
-legacy-semver-padding: 4
-build-metadata-padding: 4
-commits-since-version-source-padding: 4
 commit-message-incrementing: Enabled
 
 branches:
@@ -20,67 +15,37 @@ branches:
     mode: ContinuousDelivery
     label: ''
     increment: Patch
-    prevent-increment-of-merged-branch-version: true
-    track-merge-target: false
-    tracks-release-branches: false
-    is-release-branch: true
-    is-mainline: true
-    pre-release-weight: 55000
+    prevent-increment: true
   develop:
     regex: ^develop$|^dev$
     mode: ContinuousDelivery
     label: alpha
     increment: Minor
-    prevent-increment-of-merged-branch-version: false
-    track-merge-target: true
-    tracks-release-branches: true
-    is-release-branch: false
-    is-mainline: false
-    pre-release-weight: 0
+    prevent-increment: false
   release:
     regex: ^releases?[/-]
     mode: ContinuousDelivery
     label: beta
     increment: None
-    prevent-increment-of-merged-branch-version: true
-    track-merge-target: false
-    tracks-release-branches: false
-    is-release-branch: true
-    is-mainline: false
-    pre-release-weight: 30000
+    prevent-increment: true
   feature:
     regex: ^features?[/-]
     mode: ContinuousDelivery
     label: useBranchName
     increment: Inherit
-    prevent-increment-of-merged-branch-version: false
-    track-merge-target: false
-    tracks-release-branches: false
-    is-release-branch: false
-    is-mainline: false
-    pre-release-weight: 30000
+    prevent-increment: false
   pull-request:
     regex: ^(pull|pull\-requests|pr)[/-]
     mode: ContinuousDelivery
     label: PullRequest
     increment: Inherit
-    prevent-increment-of-merged-branch-version: false
-    track-merge-target: false
-    tracks-release-branches: false
-    is-release-branch: false
-    is-mainline: false
-    pre-release-weight: 30000
+    prevent-increment: false
   hotfix:
     regex: ^hotfix(es)?[/-]
     mode: ContinuousDelivery
     label: beta
     increment: Patch
-    prevent-increment-of-merged-branch-version: false
-    track-merge-target: false
-    tracks-release-branches: false
-    is-release-branch: false
-    is-mainline: false
-    pre-release-weight: 30000
+    prevent-increment: false
 
 ignore:
   sha: []
