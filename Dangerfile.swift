@@ -159,16 +159,6 @@ fileprivate extension Validator {
         """
         The PR added \(additions) and removed \(deletions) lines. \(changedFiles) file(s) changed.
         """
-
-        // TODO: - Add PR documentation link
-        // let seeOurDocumentation =
-        // """
-        // Documentation: \
-        // <a href=''> \
-        // Link</a>
-        // """
-
-        // message(seeOurDocumentation)
         message(overview)
     }
 }
@@ -219,7 +209,7 @@ fileprivate extension UnitTestValidator {
         // Temporarily disabled due to xcresult format incompatibility with Xcode 16.4+
         // Error: XCResultStorage.ResultBundleFactory.Error - Failed to read metadata
         // The DangerSwiftCoverage plugin calls fail() internally (doesn't throw), causing CI to fail
-        // TODO: Re-enable when DangerSwiftCoverage supports Xcode 16.4+ or migrate to alternative
+        // Re-enable when DangerSwiftCoverage supports Xcode 16.4+ or migrate to alternative
         
         warn("⚠️ Code coverage check is temporarily disabled due to xcresult format incompatibility. Please verify coverage manually in Xcode.")
         
