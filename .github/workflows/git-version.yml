@@ -74,6 +74,9 @@ jobs:
     runs-on: macos-15
     if: github.ref == 'refs/heads/main'
     
+    outputs:
+      rc_tag: ${{ steps.create_rc_tag.outputs.rc_tag }}
+    
     permissions:
       contents: write
 
@@ -118,31 +121,75 @@ jobs:
         fi
 
     - name: Push Git Tag
+      id: create_rc_tag
       env:
         GITHUB_TOKEN: ${{ secrets.BYPASS_TOKEN || secrets.GITHUB_TOKEN }}
       run: |
-        # Get the calculated version from GitVersion
-        CALC_VERSION="${{ needs.git_version.outputs.majorMinorPatch }}"
-        # Create RC tag with custom format
-        NEW_TAG="rc+${CALC_VERSION}"
+        echo "🏷️  Calculating RC tag..."
         
-        echo "Creating and pushing RC tag: $NEW_TAG (from version $CALC_VERSION)"
+        # Get the last non-RC release tag
+        LAST_RELEASE=$(git tag -l | grep -v "rc-" | grep -E "^[0-9]+\.[0-9]+\.[0-9]+$" | sort -V | tail -1)
+        echo "Last release tag: $LAST_RELEASE"
+        
+        if [ -z "$LAST_RELEASE" ]; then
+          echo "No previous release found, starting with 1.0.0"
+          LAST_RELEASE="1.0.0"
+        fi
+        
+        # Parse version components
+        MAJOR=$(echo $LAST_RELEASE | cut -d. -f1)
+        MINOR=$(echo $LAST_RELEASE | cut -d. -f2)
+        PATCH=$(echo $LAST_RELEASE | cut -d. -f3)
+        
+        # Increment MINOR version for RC
+        NEXT_MINOR=$((MINOR + 1))
+        RC_BASE_VERSION="${MAJOR}.${NEXT_MINOR}.0"
+        
+        echo "RC base version: ${RC_BASE_VERSION}"
+        
+        # Find existing RC tags for this version
+        EXISTING_RCS=$(git tag -l "rc-${MAJOR}.${NEXT_MINOR}.*" | sort -V)
+        
+        if [ -z "$EXISTING_RCS" ]; then
+          # First RC for this version
+          RC_TAG="rc-${RC_BASE_VERSION}"
+          echo "Creating first RC: $RC_TAG"
+        else
+          # Get the last RC tag and increment patch
+          LAST_RC=$(echo "$EXISTING_RCS" | tail -1)
+          echo "Last RC tag: $LAST_RC"
+          
+          # Extract patch version from last RC (rc-1.12.5 -> 5)
+          RC_PATCH=$(echo $LAST_RC | sed 's/rc-//' | cut -d. -f3)
+          NEXT_RC_PATCH=$((RC_PATCH + 1))
+          
+          RC_TAG="rc-${MAJOR}.${NEXT_MINOR}.${NEXT_RC_PATCH}"
+          echo "Creating next RC: $RC_TAG"
+        fi
+        
+        echo "Final RC tag: $RC_TAG"
+        echo "rc_tag=$RC_TAG" >> $GITHUB_OUTPUT
         
         git config --global user.name "github-actions[bot]"
         git config --global user.email "github-actions[bot]@users.noreply.github.com"
         
         # Only create and push tags if we're on main
         if [ "${{ github.ref }}" = "refs/heads/main" ]; then
-          git tag "$NEW_TAG"
-          git push origin "$NEW_TAG"
-          echo "RC tag $NEW_TAG created and pushed successfully"
+          # Check if tag already exists
+          if git rev-parse "$RC_TAG" >/dev/null 2>&1; then
+            echo "⚠️  Tag $RC_TAG already exists, skipping creation"
+          else
+            git tag "$RC_TAG"
+            git push origin "$RC_TAG"
+            echo "✅ RC tag $RC_TAG created and pushed successfully"
+          fi
         else
           echo "Skipping tag creation - not on main branch"
         fi
 
   build_xcframework:
     name: Build and Package Static Libraries
-    needs: git_version
+    needs: [git_version, tag]
     runs-on: macos-15
     if: github.ref == 'refs/heads/main'
     
@@ -339,13 +386,13 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        tag_name: rc+${{ needs.git_version.outputs.majorMinorPatch }}
-        release_name: Release rc+${{ needs.git_version.outputs.majorMinorPatch }}
+        tag_name: ${{ needs.tag.outputs.rc_tag }}
+        release_name: Release ${{ needs.tag.outputs.rc_tag }}
         body: |
-          🚀 **Release rc+${{ needs.git_version.outputs.majorMinorPatch }}**
+          🚀 **Release ${{ needs.tag.outputs.rc_tag }}**
           
           **What's New:**
-          - Auto-generated from main branch
+          - Auto-generated release candidate from main branch
           - Includes Static Libraries for iOS development
           - Built with Xcode to ensure compatibility and performance
           
@@ -355,17 +402,17 @@ jobs:
           3. Link the libraries to your target (see README.md for details)
           
           **Version Details:**
-          - RC Tag: rc+${{ needs.git_version.outputs.majorMinorPatch }}
-          - Version: ${{ needs.git_version.outputs.majorMinorPatch }}
+          - RC Tag: ${{ needs.tag.outputs.rc_tag }}
+          - This is a release candidate. A final release will be created manually when ready.
         draft: false
-        prerelease: false
+        prerelease: true
 
     - name: Upload Static Libraries Package to Release
       run: |
         # Upload the static libraries package
         if [ -f "XCFramework/DebugSwift-StaticLibraries.zip" ]; then
           echo "📦 Uploading DebugSwift Static Libraries package..."
-          gh release upload "rc+${{ needs.git_version.outputs.majorMinorPatch }}" \
+          gh release upload "${{ needs.tag.outputs.rc_tag }}" \
             "XCFramework/DebugSwift-StaticLibraries.zip" \
             --clobber
           echo "✅ Static Libraries package uploaded successfully!"
