@@ -65,8 +65,8 @@ jobs:
         VERSION="${{ steps.extract_version.outputs.VERSION }}"
         echo "Updating podspec version to: $VERSION"
         
-        # Update the version in DebugSwift.podspec
-        sed -i "s/s\.version.*=.*/s.version          = '$VERSION'/" DebugSwift.podspec
+        # Update the version in DebugSwift.podspec (macOS sed requires '' for in-place edit)
+        sed -i '' "s/s\.version.*=.*/s.version          = '$VERSION'/" DebugSwift.podspec
         
         # Verify the change
         grep "s.version" DebugSwift.podspec
