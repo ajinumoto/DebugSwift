@@ -86,39 +86,36 @@ jobs:
       with:
         token: ${{ secrets.BYPASS_TOKEN || secrets.GITHUB_TOKEN }}
         persist-credentials: true
+        fetch-depth: 0
 
-    - name: Update podspec version
-      run: |
-        NEW_VERSION="${{ needs.git_version.outputs.majorMinorPatch }}"
-        echo "Updating version to $NEW_VERSION"
-        
-        sed -i '' "s/s\.version *= *['\"][^'\"]*['\"]/s.version = '$NEW_VERSION'/" DebugSwift.podspec
-        
-        echo "Updated DebugSwift.podspec:"
-        head -20 DebugSwift.podspec
+    # NOTE: Podspec version should only be updated during manual final releases
+    # RC releases don't update the podspec
+    # - name: Update podspec version
+    #   run: |
+    #     NEW_VERSION="${{ needs.git_version.outputs.majorMinorPatch }}"
+    #     echo "Updating version to $NEW_VERSION"
+    #     sed -i '' "s/s\.version *= *['\"][^'\"]*['\"]/s.version = '$NEW_VERSION'/" DebugSwift.podspec
+    #     echo "Updated DebugSwift.podspec:"
+    #     head -20 DebugSwift.podspec
 
-    - name: Commit podspec changes
-      env:
-        GITHUB_TOKEN: ${{ secrets.BYPASS_TOKEN || secrets.GITHUB_TOKEN }}
-      run: |
-        NEW_VERSION="${{ needs.git_version.outputs.majorMinorPatch }}"
-        
-        git config --global user.name "github-actions[bot]"
-        git config --global user.email "github-actions[bot]@users.noreply.github.com"
-        
-        if git diff --quiet DebugSwift.podspec; then
-          echo "No changes to commit"
-        else
-          git add DebugSwift.podspec
-          git commit -m "chore: bump version to $NEW_VERSION"
-          
-          # Push to main if we're on main, otherwise push to current branch
-          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
-            git push origin main
-          else
-            git push origin HEAD
-          fi
-        fi
+    # - name: Commit podspec changes
+    #   env:
+    #     GITHUB_TOKEN: ${{ secrets.BYPASS_TOKEN || secrets.GITHUB_TOKEN }}
+    #   run: |
+    #     NEW_VERSION="${{ needs.git_version.outputs.majorMinorPatch }}"
+    #     git config --global user.name "github-actions[bot]"
+    #     git config --global user.email "github-actions[bot]@users.noreply.github.com"
+    #     if git diff --quiet DebugSwift.podspec; then
+    #       echo "No changes to commit"
+    #     else
+    #       git add DebugSwift.podspec
+    #       git commit -m "chore: bump version to $NEW_VERSION"
+    #       if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+    #         git push origin main
+    #       else
+    #         git push origin HEAD
+    #       fi
+    #     fi
 
     - name: Push Git Tag
       id: create_rc_tag
