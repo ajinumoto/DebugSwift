@@ -89,7 +89,7 @@ jobs:
         NEW_VERSION="${{ needs.git_version.outputs.majorMinorPatch }}"
         echo "Updating version to $NEW_VERSION"
         
-        sed -i '' "s/spec.version *= *['\"][^'\"]*['\"]/spec.version = '$NEW_VERSION'/" DebugSwift.podspec
+        sed -i '' "s/s\.version *= *['\"][^'\"]*['\"]/s.version = '$NEW_VERSION'/" DebugSwift.podspec
         
         echo "Updated DebugSwift.podspec:"
         head -20 DebugSwift.podspec
