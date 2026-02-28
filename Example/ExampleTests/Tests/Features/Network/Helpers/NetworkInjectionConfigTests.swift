@@ -266,4 +266,57 @@ final class NetworkInjectionConfigTests: XCTestCase {
             XCTAssertNotNil(error)
         }
     }
+    
+    // MARK: - ResponseBodyRewriteConfig Tests
+    
+    func testResponseBodyRewriteConfigMatchesWildcardRule() {
+        let config = ResponseBodyRewriteConfig(
+            isEnabled: true,
+            rules: [
+                ResponseBodyRewriteRule(
+                    urlPattern: "https://api.example.com/v1/*",
+                    responseBody: "{\"mocked\": true}"
+                )
+            ]
+        )
+        
+        let request = URLRequest(url: URL(string: "https://api.example.com/v1/users")!)
+        let matched = config.matchingRule(for: request)
+        
+        XCTAssertNotNil(matched)
+        XCTAssertEqual(matched?.responseBody, "{\"mocked\": true}")
+    }
+    
+    func testResponseBodyRewriteConfigReturnsFirstMatch() {
+        let firstRule = ResponseBodyRewriteRule(
+            urlPattern: "https://api.example.com/*",
+            responseBody: "{\"source\": \"first\"}"
+        )
+        let secondRule = ResponseBodyRewriteRule(
+            urlPattern: "https://api.example.com/v1/*",
+            responseBody: "{\"source\": \"second\"}"
+        )
+        
+        let config = ResponseBodyRewriteConfig(
+            isEnabled: true,
+            rules: [firstRule, secondRule]
+        )
+        
+        let request = URLRequest(url: URL(string: "https://api.example.com/v1/users")!)
+        let matched = config.matchingRule(for: request)
+        
+        XCTAssertEqual(matched, firstRule)
+    }
+    
+    func testResponseBodyRewriteConfigDisabled() {
+        let config = ResponseBodyRewriteConfig(
+            isEnabled: false,
+            rules: [
+                ResponseBodyRewriteRule(urlPattern: "*", responseBody: "body")
+            ]
+        )
+        
+        let request = URLRequest(url: URL(string: "https://api.example.com/users")!)
+        XCTAssertNil(config.matchingRule(for: request))
+    }
 }

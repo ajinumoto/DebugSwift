@@ -240,6 +240,47 @@ public struct NetworkFailureConfig: Sendable {
     }
 }
 
+/// A single response body rewrite rule.
+public struct ResponseBodyRewriteRule: Sendable, Equatable {
+    /// URL pattern to match (supports wildcard `*` and `?`)
+    public var urlPattern: String
+    
+    /// Replacement response body text
+    public var responseBody: String
+    
+    public init(urlPattern: String, responseBody: String) {
+        self.urlPattern = urlPattern
+        self.responseBody = responseBody
+    }
+}
+
+/// Configuration for response body rewrite injection
+public struct ResponseBodyRewriteConfig: Sendable {
+    /// Whether response body rewrite is enabled
+    public var isEnabled: Bool
+    
+    /// Ordered rewrite rules. First match wins.
+    public var rules: [ResponseBodyRewriteRule]
+    
+    public init(
+        isEnabled: Bool = false,
+        rules: [ResponseBodyRewriteRule] = []
+    ) {
+        self.isEnabled = isEnabled
+        self.rules = rules
+    }
+    
+    /// Returns matching rewrite rule for request if enabled.
+    func matchingRule(for request: URLRequest) -> ResponseBodyRewriteRule? {
+        guard isEnabled else { return nil }
+        guard let urlString = request.url?.absoluteString else { return nil }
+        
+        return rules.first { rule in
+            urlString.contains(rule.urlPattern) || urlString.matches(pattern: rule.urlPattern)
+        }
+    }
+}
+
 // MARK: - String Pattern Matching Extension
 
 private extension String {
