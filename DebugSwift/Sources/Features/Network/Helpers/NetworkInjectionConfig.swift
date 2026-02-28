@@ -57,10 +57,12 @@ public struct RequestDelayConfig: Sendable {
         
         // Check URL patterns
         if !urlPatterns.isEmpty {
-            guard let urlString = request.url?.absoluteString else { return false }
-            let matches = urlPatterns.contains { pattern in
-                urlString.contains(pattern) || urlString.matches(pattern: pattern)
-            }
+            guard let url = request.url else { return false }
+            let matches = url.matchesAny(
+                wildcardPatterns: urlPatterns,
+                strategy: .contains,
+                queryStrategy: .subset
+            )
             if !matches { return false }
         }
         
@@ -205,10 +207,12 @@ public struct NetworkFailureConfig: Sendable {
         
         // Check URL patterns
         if !urlPatterns.isEmpty {
-            guard let urlString = request.url?.absoluteString else { return false }
-            let matches = urlPatterns.contains { pattern in
-                urlString.contains(pattern) || urlString.matches(pattern: pattern)
-            }
+            guard let url = request.url else { return false }
+            let matches = url.matchesAny(
+                wildcardPatterns: urlPatterns,
+                strategy: .contains,
+                queryStrategy: .subset
+            )
             if !matches { return false }
         }
         
@@ -273,29 +277,14 @@ public struct ResponseBodyRewriteConfig: Sendable {
     /// Returns matching rewrite rule for request if enabled.
     func matchingRule(for request: URLRequest) -> ResponseBodyRewriteRule? {
         guard isEnabled else { return nil }
-        guard let urlString = request.url?.absoluteString else { return nil }
+        guard let url = request.url else { return nil }
         
         return rules.first { rule in
-            urlString.contains(rule.urlPattern) || urlString.matches(pattern: rule.urlPattern)
+            url.matches(
+                wildcardPattern: rule.urlPattern,
+                strategy: .full,
+                queryStrategy: .exact
+            )
         }
-    }
-}
-
-// MARK: - String Pattern Matching Extension
-
-private extension String {
-    func matches(pattern: String) -> Bool {
-        // Simple wildcard matching (* and ?)
-        let regexPattern = pattern
-            .replacingOccurrences(of: ".", with: "\\.")
-            .replacingOccurrences(of: "*", with: ".*")
-            .replacingOccurrences(of: "?", with: ".")
-        
-        guard let regex = try? NSRegularExpression(pattern: "^" + regexPattern + "$") else {
-            return false
-        }
-        
-        let range = NSRange(location: 0, length: utf16.count)
-        return regex.firstMatch(in: self, range: range) != nil
     }
 }
