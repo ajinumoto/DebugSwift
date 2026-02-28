@@ -18,7 +18,7 @@ enum WindowManager {
 
     static let window: CustomWindow = {
         let window: CustomWindow
-        if let scene = UIApplication.keyWindow?.windowScene {
+        if let scene = currentWindowScene {
             window = CustomWindow(windowScene: scene)
         } else {
             window = CustomWindow(frame: UIScreen.main.bounds)
@@ -33,7 +33,22 @@ enum WindowManager {
         return window
     }()
 
+    static var currentWindowScene: UIWindowScene? {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .sorted { $0.activationState.priority > $1.activationState.priority }
+            .first
+    }
+
+    static func prepareWindowForOverlay() {
+        if window.windowScene == nil, let scene = currentWindowScene {
+            window.windowScene = scene
+        }
+        window.isHidden = false
+    }
+
     static func presentDebugger() {
+        prepareWindowForOverlay()
         guard !FloatViewManager.isShowingDebuggerView else { return }
         FloatViewManager.isShowingDebuggerView = true
         if let viewController = FloatViewManager.shared.floatViewController {
@@ -65,6 +80,7 @@ enum WindowManager {
     }
 
     static func presentViewDebugger() {
+        prepareWindowForOverlay()
         guard !FloatViewManager.isShowingDebuggerView else { return }
         FloatViewManager.isShowingDebuggerView = true
 
@@ -135,5 +151,17 @@ final class CustomWindow: UIWindow {
         }
 
         return false
+    }
+}
+
+private extension UIScene.ActivationState {
+    var priority: Int {
+        switch self {
+        case .foregroundActive: return 3
+        case .foregroundInactive: return 2
+        case .background: return 1
+        case .unattached: return 0
+        @unknown default: return -1
+        }
     }
 }

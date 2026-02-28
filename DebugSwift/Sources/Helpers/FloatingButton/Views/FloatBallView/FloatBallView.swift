@@ -36,6 +36,7 @@ class FloatBallView: UIView {
             updateText()
             guard oldValue != show else { return }
             if show {
+                WindowManager.prepareWindowForOverlay()
                 WindowManager.window.addSubview(self)
                 layer.position = .init(
                     x: Self.savedX,
