@@ -103,7 +103,7 @@ final class RewriteRuleEditViewController: BaseController {
     @objc private func saveTapped() {
         let pattern = (patternField.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         guard !pattern.isEmpty else {
-            showAlert(with: "Error", title: "URL pattern cannot be empty")
+            showAlert(with: "URL pattern cannot be empty", title: "Error")
             return
         }
         

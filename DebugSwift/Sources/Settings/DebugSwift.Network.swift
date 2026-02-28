@@ -198,6 +198,7 @@ extension DebugSwift {
         /// - Parameters:
         ///   - delayConfig: Optional delay configuration
         ///   - failureConfig: Optional failure configuration
+        ///   - rewriteConfig: Optional response body rewrite configuration
         public func configureNetworkInjection(
             delayConfig: RequestDelayConfig? = nil,
             failureConfig: NetworkFailureConfig? = nil,
