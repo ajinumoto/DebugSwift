@@ -12,7 +12,7 @@ extension UIApplication {
         let allScenes = UIApplication.shared.connectedScenes
             .compactMap { $0 as? UIWindowScene }
             .sorted {
-                $0.activationState.priority > $1.activationState.priority
+                scenePriority(for: $0.activationState) > scenePriority(for: $1.activationState)
             }
 
         for scene in allScenes {
@@ -28,6 +28,16 @@ extension UIApplication {
         }
 
         return nil
+    }
+
+    private static func scenePriority(for activationState: UIScene.ActivationState) -> Int {
+        switch activationState {
+        case .foregroundActive: return 3
+        case .foregroundInactive: return 2
+        case .background: return 1
+        case .unattached: return 0
+        @unknown default: return -1
+        }
     }
     
     class func topViewController(
@@ -51,17 +61,5 @@ extension UIWindowScene {
         UIApplication.shared.connectedScenes
             .compactMap { $0 as? UIWindowScene }
             .flatMap { $0.windows }
-    }
-}
-
-private extension UIScene.ActivationState {
-    var priority: Int {
-        switch self {
-        case .foregroundActive: return 3
-        case .foregroundInactive: return 2
-        case .background: return 1
-        case .unattached: return 0
-        @unknown default: return -1
-        }
     }
 }

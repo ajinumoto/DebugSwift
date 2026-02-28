@@ -36,15 +36,35 @@ enum WindowManager {
     static var currentWindowScene: UIWindowScene? {
         UIApplication.shared.connectedScenes
             .compactMap { $0 as? UIWindowScene }
-            .sorted { $0.activationState.priority > $1.activationState.priority }
+            .sorted {
+                scenePriority(for: $0.activationState) > scenePriority(for: $1.activationState)
+            }
             .first
     }
 
     static func prepareWindowForOverlay() {
-        if window.windowScene == nil, let scene = currentWindowScene {
-            window.windowScene = scene
+        guard let scene = currentWindowScene else {
+            window.isHidden = false
+            return
         }
+
+        if window.windowScene !== scene {
+            window.isHidden = true
+            window.windowScene = scene
+            window.frame = scene.coordinateSpace.bounds
+        }
+
         window.isHidden = false
+    }
+
+    private static func scenePriority(for activationState: UIScene.ActivationState) -> Int {
+        switch activationState {
+        case .foregroundActive: return 3
+        case .foregroundInactive: return 2
+        case .background: return 1
+        case .unattached: return 0
+        @unknown default: return -1
+        }
     }
 
     static func presentDebugger() {
@@ -151,17 +171,5 @@ final class CustomWindow: UIWindow {
         }
 
         return false
-    }
-}
-
-private extension UIScene.ActivationState {
-    var priority: Int {
-        switch self {
-        case .foregroundActive: return 3
-        case .foregroundInactive: return 2
-        case .background: return 1
-        case .unattached: return 0
-        @unknown default: return -1
-        }
     }
 }
