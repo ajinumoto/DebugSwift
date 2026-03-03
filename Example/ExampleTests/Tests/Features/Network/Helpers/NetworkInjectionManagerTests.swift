@@ -232,6 +232,19 @@ final class NetworkInjectionManagerTests: XCTestCase {
         
         XCTAssertEqual(matched, secondRule)
     }
+
+    func testMatchingRewriteRuleIgnoresQueryOrder() {
+        let rule = ResponseBodyRewriteRule(
+            urlPattern: "https://api.example.com/search?sort=desc&q=swift",
+            responseBody: "{\"mocked\":true}"
+        )
+        manager.setRewriteConfig(ResponseBodyRewriteConfig(isEnabled: true, rules: [rule]))
+
+        let request = URLRequest(url: URL(string: "https://api.example.com/search?q=swift&sort=desc")!)
+        let matched = manager.matchingRewriteRule(for: request)
+
+        XCTAssertEqual(matched, rule)
+    }
     
     func testRewriteRulesRemainWhenRewriteIsDisabled() {
         let rule = ResponseBodyRewriteRule(
