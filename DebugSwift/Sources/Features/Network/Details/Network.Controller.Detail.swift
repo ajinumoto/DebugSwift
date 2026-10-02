@@ -40,7 +40,8 @@ final class NetworkViewControllerDetail: BaseTableController {
         let injectionManager = NetworkInjectionManager.shared
         let isInjectionActive = injectionManager.getDelayConfig().isEnabled || 
                                 injectionManager.getFailureConfig().isEnabled ||
-                                injectionManager.getRewriteConfig().isEnabled
+                                injectionManager.getRewriteConfig().isEnabled ||
+                                injectionManager.getDebugConfig().isEnabled
 
         let injectionButton: UIBarButtonItem
         if #available(iOS 14.0, *) {
@@ -124,6 +125,13 @@ final class NetworkViewControllerDetail: BaseTableController {
             self?.showCreateRewriteRuleEditor()
         }
 
+        let debugAction = UIAction(
+            title: "Debug",
+            image: UIImage(systemName: "ladybug")
+        ) { [weak self] _ in
+            self?.enableDebugForEndpoint()
+        }
+
         let advancedAction = UIAction(
             title: "Advanced Settings...",
             image: UIImage(systemName: "gearshape")
@@ -147,6 +155,7 @@ final class NetworkViewControllerDetail: BaseTableController {
                 delayMenu,
                 failureMenu,
                 rewriteAction,
+                debugAction,
                 advancedAction,
                 clearAction
             ]
@@ -273,9 +282,34 @@ final class NetworkViewControllerDetail: BaseTableController {
         var rewriteConfig = NetworkInjectionManager.shared.getRewriteConfig()
         rewriteConfig.isEnabled = false
         NetworkInjectionManager.shared.setRewriteConfig(rewriteConfig)
+
+        var debugConfig = NetworkInjectionManager.shared.getDebugConfig()
+        debugConfig.isEnabled = false
+        NetworkInjectionManager.shared.setDebugConfig(debugConfig)
         
         setupNavigation()
         UINotificationFeedbackGenerator().notificationOccurred(.success)
+    }
+
+    private func enableDebugForEndpoint() {
+        guard let url = model.url?.absoluteString else { return }
+        var config = NetworkInjectionManager.shared.getDebugConfig()
+        let method = HTTPMethod(rawValue: (model.method ?? "GET").uppercased())
+
+        if let index = config.rules.firstIndex(where: { $0.urlPattern == url }) {
+            config.rules[index].isEnabled = true
+        } else {
+            config.rules.append(NetworkDebugRule(urlPattern: url, httpMethod: method, isEnabled: true))
+        }
+        config.isEnabled = true
+        NetworkInjectionManager.shared.setDebugConfig(config)
+        setupNavigation()
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        showAlert(
+            with: "Breakpoint set for \(url). Network Debug is now active.",
+            title: "Network Debug Added",
+            rightButtonTitle: "OK"
+        )
     }
 
     private func showCreateRewriteRuleEditor() {

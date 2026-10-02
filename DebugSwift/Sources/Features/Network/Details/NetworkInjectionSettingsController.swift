@@ -14,12 +14,14 @@ final class NetworkInjectionSettingsController: BaseTableController {
         case delay
         case failure
         case rewrite
+        case debug
         
         var title: String {
             switch self {
             case .delay: return "REQUEST DELAY INJECTION"
             case .failure: return "NETWORK FAILURE INJECTION"
             case .rewrite: return "RESPONSE MODIFIER"
+            case .debug: return "NETWORK DEBUG"
             }
         }
     }
@@ -30,6 +32,9 @@ final class NetworkInjectionSettingsController: BaseTableController {
     private var failureConfig: NetworkFailureConfig
     private var rewriteConfig: ResponseBodyRewriteConfig {
         NetworkInjectionManager.shared.getRewriteConfig()
+    }
+    private var debugConfig: NetworkDebugConfig {
+        NetworkInjectionManager.shared.getDebugConfig()
     }
     
     // MARK: - Initialization
@@ -45,6 +50,13 @@ final class NetworkInjectionSettingsController: BaseTableController {
     override func viewDidLoad() {
         super.viewDidLoad()
         setupUI()
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        self.delayConfig = NetworkInjectionManager.shared.getDelayConfig()
+        self.failureConfig = NetworkInjectionManager.shared.getFailureConfig()
+        tableView.reloadData()
     }
     
     private func setupUI() {
@@ -68,7 +80,7 @@ final class NetworkInjectionSettingsController: BaseTableController {
             return delayConfig.isEnabled ? 5 : 1
         case .failure:
             return failureConfig.isEnabled ? (failureConfig.failureType.isHTTPError ? 6 : 5) : 1
-        case .rewrite:
+        case .rewrite, .debug:
             return 1
         }
     }
@@ -82,6 +94,8 @@ final class NetworkInjectionSettingsController: BaseTableController {
         switch sectionType {
         case .rewrite:
             return "Warning: Broad wildcard patterns (such as *) and many rewrite rules can reduce network matching performance."
+        case .debug:
+            return "Breakpoint sheets will pause requests and responses matching rules for real-time inspection and editing."
         case .delay, .failure:
             return nil
         }
@@ -99,6 +113,8 @@ final class NetworkInjectionSettingsController: BaseTableController {
             return failureCell(for: indexPath.row)
         case .rewrite:
             return rewriteCell(for: indexPath.row)
+        case .debug:
+            return debugCell(for: indexPath.row)
         }
     }
     
@@ -114,6 +130,8 @@ final class NetworkInjectionSettingsController: BaseTableController {
             handleFailureSelection(row: indexPath.row)
         case .rewrite:
             handleRewriteSelection(row: indexPath.row)
+        case .debug:
+            handleDebugSelection(row: indexPath.row)
         }
     }
     
@@ -234,6 +252,34 @@ final class NetworkInjectionSettingsController: BaseTableController {
         }
         
         return cell
+    }
+
+    // MARK: - Debug Cells
+    
+    private func debugCell(for row: Int) -> UITableViewCell {
+        let cell = UITableViewCell(style: .value1, reuseIdentifier: "Cell")
+        cell.backgroundColor = .black
+        cell.textLabel?.textColor = .white
+        cell.detailTextLabel?.textColor = .lightGray
+        
+        switch row {
+        case 0:
+            cell.textLabel?.text = "Network Debug"
+            let rules = debugConfig.rules
+            let enabledRules = rules.filter(\.isEnabled).count
+            let state = debugConfig.isEnabled ? "On" : "Off"
+            cell.detailTextLabel?.text = "\(state) • \(enabledRules)/\(rules.count)"
+            cell.accessoryType = .disclosureIndicator
+        default:
+            break
+        }
+        
+        return cell
+    }
+
+    private func handleDebugSelection(row: Int) {
+        let vc = NetworkDebugSettingsController()
+        navigationController?.pushViewController(vc, animated: true)
     }
     
     // MARK: - Actions

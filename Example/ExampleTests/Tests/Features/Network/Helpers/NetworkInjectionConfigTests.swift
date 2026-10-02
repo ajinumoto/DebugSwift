@@ -699,4 +699,35 @@ https://api.example.com/*,200,"{"ok":true},
             )
         )
     }
+
+    // MARK: - NetworkDebugConfig Tests
+
+    func testNetworkDebugRuleMatchingExactAndWildcard() {
+        let exactRule = NetworkDebugRule(
+            urlPattern: "https://api.example.com/users",
+            httpMethod: .get,
+            isEnabled: true
+        )
+        let wildcardRule = NetworkDebugRule(
+            urlPattern: "https://api.example.com/*",
+            httpMethod: nil,
+            isEnabled: true
+        )
+        let disabledRule = NetworkDebugRule(
+            urlPattern: "https://api.example.com/users",
+            httpMethod: .get,
+            isEnabled: false
+        )
+
+        let config = NetworkDebugConfig(isEnabled: true, rules: [exactRule, wildcardRule, disabledRule])
+
+        let getUrl = URL(string: "https://api.example.com/users")!
+        XCTAssertTrue(config.matchesRule(exactRule, requestURLLowercased: getUrl.absoluteString.lowercased(), requestURL: getUrl, requestMethod: .get))
+        XCTAssertFalse(config.matchesRule(exactRule, requestURLLowercased: getUrl.absoluteString.lowercased(), requestURL: getUrl, requestMethod: .post))
+        XCTAssertFalse(config.matchesRule(disabledRule, requestURLLowercased: getUrl.absoluteString.lowercased(), requestURL: getUrl, requestMethod: .get))
+
+        let otherUrl = URL(string: "https://api.example.com/posts/123")!
+        XCTAssertTrue(config.matchesRule(wildcardRule, requestURLLowercased: otherUrl.absoluteString.lowercased(), requestURL: otherUrl, requestMethod: .post))
+    }
 }
+

@@ -124,7 +124,8 @@ final class NetworkSessionRequestListViewController: BaseController {
             let injectionManager = NetworkInjectionManager.shared
             let isInjectionActive = injectionManager.getDelayConfig().isEnabled || 
                                     injectionManager.getFailureConfig().isEnabled ||
-                                    injectionManager.getRewriteConfig().isEnabled
+                                    injectionManager.getRewriteConfig().isEnabled ||
+                                    injectionManager.getDebugConfig().isEnabled
 
             let injectionButton = UIBarButtonItem(
                 image: injectionSymbolImage(),
@@ -153,6 +154,14 @@ final class NetworkSessionRequestListViewController: BaseController {
             self?.importSessionTapped()
         }
 
+        let debugAction = UIAction(
+            title: "Network Debug",
+            image: UIImage(systemName: "ladybug")
+        ) { [weak self] _ in
+            let debugController = NetworkDebugSettingsController()
+            self?.navigationController?.pushViewController(debugController, animated: true)
+        }
+
         let advancedAction = UIAction(
             title: "Advanced Settings...",
             image: UIImage(systemName: "gearshape")
@@ -165,6 +174,7 @@ final class NetworkSessionRequestListViewController: BaseController {
             title: "Session Injection",
             children: [
                 importAction,
+                debugAction,
                 advancedAction
             ]
         )

@@ -111,4 +111,10 @@ final class HeroHeaderView: UIView {
             iconContainer.backgroundColor = .systemGray
         }
     }
+
+    func configure(title: String, description: String, isEnabled: Bool) {
+        titleLabel.text = title
+        descriptionLabel.text = description
+        configure(isEnabled: isEnabled)
+    }
 }

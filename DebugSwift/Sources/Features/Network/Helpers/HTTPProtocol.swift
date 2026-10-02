@@ -92,6 +92,7 @@ public final class CustomHTTPProtocol: URLProtocol, @unchecked Sendable {
     private var matchedRewriteRule: ResponseBodyRewriteRule?
     private let reportQueue = DispatchQueue(label: "com.debugswift.http-protocol.report")
     private var didReport = false
+    private var isDebuggingResponse = false
 
     private var threadOperator: ThreadOperator?
     
@@ -150,6 +151,31 @@ public final class CustomHTTPProtocol: URLProtocol, @unchecked Sendable {
 
         Debug.print(request.requestId)
         
+        // Check for Network Debug Breakpoint (Request Phase)
+        if let _ = NetworkInjectionManager.shared.matchingDebugRule(for: request) {
+            let action = NetworkBreakpointManager.shared.handleRequestBreakpoint(request: request)
+            switch action {
+            case .abort:
+                injectNetworkError(NSError(
+                    domain: NSURLErrorDomain,
+                    code: NSURLErrorCancelled,
+                    userInfo: [NSLocalizedDescriptionKey: "Request cancelled by Network Breakpoint."]
+                ))
+                return
+            case .mock(let statusCode, let headers, let body):
+                injectMockResponse(statusCode: statusCode, headers: headers, data: body, for: request)
+                return
+            case .resume(_, let modifiedHeaders, let modifiedBody):
+                if let modifiedHeaders = modifiedHeaders {
+                    newRequest.allHTTPHeaderFields = modifiedHeaders
+                }
+                if let modifiedBody = modifiedBody {
+                    newRequest.httpBody = modifiedBody
+                }
+                self.isDebuggingResponse = true
+            }
+        }
+
         // Apply delay injection first (synchronous)
         NetworkInjectionManager.shared.applyDelayIfNeeded(for: request)
         
@@ -396,6 +422,58 @@ public final class CustomHTTPProtocol: URLProtocol, @unchecked Sendable {
             Self.report(data, matchedResponseModifier: true)
         }
     }
+
+    private func injectMockResponse(statusCode: Int, headers: [String: String], data: Data, for request: URLRequest) {
+        guard let url = request.url else { return }
+        
+        var responseHeaders = headers
+        if responseHeaders["Content-Type"] == nil {
+            responseHeaders["Content-Type"] = "application/json"
+        }
+        
+        let response = HTTPURLResponse(
+            url: url,
+            statusCode: statusCode,
+            httpVersion: "HTTP/1.1",
+            headerFields: responseHeaders
+        )
+        
+        guard markReportedIfNeeded() else { return }
+
+        if let response {
+            self.response = response
+            self.data = data
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: data)
+        }
+        
+        client?.urlProtocolDidFinishLoading(self)
+        
+        let method = request.httpMethod
+        let requestId = request.requestId
+        let cachePolicy = getCachePolicy(value: request.cachePolicy.rawValue)
+        let requestHeaderFields = request.allHTTPHeaderFields
+        let now = Date()
+        
+        Task { @MainActor in
+            let reportData = NetworkReportData(
+                url: url,
+                method: method,
+                requestData: request.httpBody,
+                responseData: data,
+                statusCode: "\(statusCode)",
+                mineType: responseHeaders["Content-Type"] ?? "application/json",
+                startTime: now,
+                endTime: now,
+                error: nil,
+                requestHeaderFields: requestHeaderFields,
+                responseHeaderFields: responseHeaders,
+                requestId: requestId,
+                cachePolicy: cachePolicy
+            )
+            Self.report(reportData, matchedResponseModifier: true)
+        }
+    }
     
     private func getPreservedConfigurationForRequest() -> URLSessionConfiguration? {
         // Check if we have stored TLS configuration settings
@@ -443,7 +521,7 @@ public final class CustomHTTPProtocol: URLProtocol, @unchecked Sendable {
         let responseHeaderFields = headersToString(response?.allHeaderFields)
         let requestId = request.requestId
         let cachePolicy = getCachePolicy(value: request.cachePolicy.rawValue)
-        let matchedResponseModifier = matchedRewriteRule != nil
+        let matchedResponseModifier = matchedRewriteRule != nil || isDebuggingResponse
 
         guard markReportedIfNeeded() else { return }
 
@@ -591,6 +669,12 @@ extension CustomHTTPProtocol: URLSessionDataDelegate {
                 self.cachePolicy = CacheHelper.cacheStoragePolicy(for: request, and: response)
             }
 
+            if self.isDebuggingResponse {
+                self.response = response as? HTTPURLResponse
+                completionHandler(.allow)
+                return
+            }
+
             var interceptedResponse = response
             if let httpResponse = response as? HTTPURLResponse, let matchedRewriteRule = self.matchedRewriteRule {
                 interceptedResponse = self.rewriteResponse(
@@ -614,6 +698,12 @@ extension CustomHTTPProtocol: URLSessionDataDelegate {
             guard let self else { return }
             Debug.print(#function)
             
+            if self.isDebuggingResponse {
+                self.data.append(data)
+                self.didReceiveData = true
+                return
+            }
+
             if self.matchedRewriteRule != nil {
                 self.didReceiveData = true
                 return
@@ -718,6 +808,104 @@ extension CustomHTTPProtocol: URLSessionDataDelegate {
                 self.session?.finishTasksAndInvalidate()
                 self.session = nil
                 return
+            }
+
+            if self.isDebuggingResponse {
+                let action = NetworkBreakpointManager.shared.handleResponseBreakpoint(
+                    request: self.request,
+                    response: self.response,
+                    data: self.data
+                )
+                switch action {
+                case .abort:
+                    let abortError = NSError(
+                        domain: NSURLErrorDomain,
+                        code: NSURLErrorCancelled,
+                        userInfo: [NSLocalizedDescriptionKey: "Response cancelled by Network Breakpoint."]
+                    )
+                    self.error = abortError
+                    self.client?.urlProtocol(self, didFailWithError: abortError)
+                    self.session?.finishTasksAndInvalidate()
+                    self.session = nil
+                    return
+                case .resume(let statusCode, let modifiedHeaders, let modifiedBody):
+                    let finalCode = statusCode ?? self.response?.statusCode ?? 200
+                    var headers = modifiedHeaders ?? (self.headersToString(self.response?.allHeaderFields) ?? [:])
+                    headers = headers.filter { $0.key.caseInsensitiveCompare("Content-Length") != .orderedSame }
+                    let finalData = modifiedBody ?? self.data
+                    let responseURL = self.response?.url ?? self.request.url!
+                    let finalResponse = HTTPURLResponse(
+                        url: responseURL,
+                        statusCode: finalCode,
+                        httpVersion: "HTTP/1.1",
+                        headerFields: headers
+                    ) ?? self.response
+
+                    self.response = finalResponse
+                    self.data = finalData
+
+                    if let finalResponse {
+                        DebugSwift.Network.shared.delegate?.urlSession(
+                            self,
+                            didReceive: finalResponse
+                        )
+                        self.client?.urlProtocol(self, didReceive: finalResponse, cacheStoragePolicy: self.cachePolicy)
+                    }
+
+                    DebugSwift.Network.shared.delegate?.urlSession(
+                        self,
+                        didReceive: finalData
+                    )
+                    self.client?.urlProtocol(self, didLoad: finalData)
+                    DebugSwift.Network.shared.delegate?.didFinishLoading(self)
+                    self.client?.urlProtocolDidFinishLoading(self)
+
+                    if self.cachePolicy == .allowed {
+                        URLCache.customHttp.storeIfNeeded(for: task, data: finalData)
+                    }
+
+                    self.session?.finishTasksAndInvalidate()
+                    self.session = nil
+                    return
+
+                case .mock(let statusCode, let headers, let body):
+                    var finalHeaders = headers
+                    finalHeaders = finalHeaders.filter { $0.key.caseInsensitiveCompare("Content-Length") != .orderedSame }
+                    let responseURL = self.response?.url ?? self.request.url!
+                    let finalResponse = HTTPURLResponse(
+                        url: responseURL,
+                        statusCode: statusCode,
+                        httpVersion: "HTTP/1.1",
+                        headerFields: finalHeaders
+                    ) ?? self.response
+
+                    self.response = finalResponse
+                    self.data = body
+
+                    if let finalResponse {
+                        DebugSwift.Network.shared.delegate?.urlSession(
+                            self,
+                            didReceive: finalResponse
+                        )
+                        self.client?.urlProtocol(self, didReceive: finalResponse, cacheStoragePolicy: self.cachePolicy)
+                    }
+
+                    DebugSwift.Network.shared.delegate?.urlSession(
+                        self,
+                        didReceive: body
+                    )
+                    self.client?.urlProtocol(self, didLoad: body)
+                    DebugSwift.Network.shared.delegate?.didFinishLoading(self)
+                    self.client?.urlProtocolDidFinishLoading(self)
+
+                    if self.cachePolicy == .allowed {
+                        URLCache.customHttp.storeIfNeeded(for: task, data: body)
+                    }
+
+                    self.session?.finishTasksAndInvalidate()
+                    self.session = nil
+                    return
+                }
             }
             
             if let matchedRewriteRule = self.matchedRewriteRule {

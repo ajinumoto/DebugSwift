@@ -143,7 +143,8 @@ final class CustomWindow: UIWindow {
         let ballView = FloatViewManager.shared.ballView
         if
             (ballView.window === self && ballView.point(inside: convert(point, to: ballView), with: event)) ||
-            FloatViewManager.isShowingDebuggerView {
+            FloatViewManager.isShowingDebuggerView ||
+            rootViewController?.presentedViewController != nil {
             return true
         }
 

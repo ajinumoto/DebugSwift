@@ -20,6 +20,7 @@ final class NetworkInjectionManagerTests: XCTestCase {
         manager.setDelayConfig(RequestDelayConfig())
         manager.setFailureConfig(NetworkFailureConfig())
         manager.setRewriteConfig(ResponseBodyRewriteConfig())
+        manager.setDebugConfig(NetworkDebugConfig())
     }
     
     // MARK: - Delay Config Tests
@@ -264,4 +265,47 @@ final class NetworkInjectionManagerTests: XCTestCase {
         XCTAssertFalse(retrieved.isEnabled)
         XCTAssertEqual(retrieved.rules, [expectedRule])
     }
+
+    // MARK: - Debug Config Tests
+
+    func testSetAndGetDebugConfig() {
+        let rule = NetworkDebugRule(
+            urlPattern: "https://api.example.com/checkout",
+            httpMethod: .post,
+            isEnabled: true
+        )
+        let config = NetworkDebugConfig(isEnabled: true, rules: [rule])
+        manager.setDebugConfig(config)
+
+        let retrieved = manager.getDebugConfig()
+        XCTAssertTrue(retrieved.isEnabled)
+        XCTAssertEqual(retrieved.rules.count, 1)
+        XCTAssertEqual(retrieved.rules.first?.urlPattern, "https://api.example.com/checkout")
+        XCTAssertEqual(retrieved.rules.first?.httpMethod, .post)
+    }
+
+    func testMatchingDebugRule() {
+        let rule = NetworkDebugRule(
+            urlPattern: "https://api.example.com/checkout",
+            httpMethod: .post,
+            isEnabled: true
+        )
+        manager.setDebugConfig(NetworkDebugConfig(isEnabled: true, rules: [rule]))
+
+        var postRequest = URLRequest(url: URL(string: "https://api.example.com/checkout")!)
+        postRequest.httpMethod = "POST"
+        let matchedPost = manager.matchingDebugRule(for: postRequest)
+        XCTAssertNotNil(matchedPost)
+        XCTAssertEqual(matchedPost?.urlPattern, "https://api.example.com/checkout")
+
+        var getRequest = URLRequest(url: URL(string: "https://api.example.com/checkout")!)
+        getRequest.httpMethod = "GET"
+        let matchedGet = manager.matchingDebugRule(for: getRequest)
+        XCTAssertNil(matchedGet)
+
+        // When debug config is disabled, should not match
+        manager.setDebugConfig(NetworkDebugConfig(isEnabled: false, rules: [rule]))
+        XCTAssertNil(manager.matchingDebugRule(for: postRequest))
+    }
 }
+

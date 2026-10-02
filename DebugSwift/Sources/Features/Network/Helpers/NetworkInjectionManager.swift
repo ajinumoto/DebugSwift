@@ -16,6 +16,8 @@ final class NetworkInjectionManager: @unchecked Sendable {
         static let rewriteAutoEnableOnRun = "DebugSwift.NetworkInjection.RewriteAutoEnableOnRun"
         static let rewriteShortCircuitEnabled = "DebugSwift.NetworkInjection.RewriteShortCircuitEnabled"
         static let rewriteMultipleMatchEnabled = "DebugSwift.NetworkInjection.RewriteMultipleMatchEnabled"
+        static let debugRules = "DebugSwift.NetworkInjection.DebugRules"
+        static let debugEnabled = "DebugSwift.NetworkInjection.DebugEnabled"
     }
     
     private let queue = DispatchQueue(label: "com.debugswift.injection", attributes: .concurrent)
@@ -23,6 +25,8 @@ final class NetworkInjectionManager: @unchecked Sendable {
     private var _failureConfig: NetworkFailureConfig = NetworkFailureConfig()
     private var _rewriteConfig: ResponseBodyRewriteConfig = ResponseBodyRewriteConfig()
     private var _rewriteRulesSnapshot: [ResponseBodyRewriteRule] = []
+    private var _debugConfig: NetworkDebugConfig = NetworkDebugConfig()
+    private var _debugRulesSnapshot: [NetworkDebugRule] = []
     
     private init() {
         _rewriteConfig.isEnabled = shouldAutoEnableRewriteOnRun()
@@ -32,6 +36,9 @@ final class NetworkInjectionManager: @unchecked Sendable {
             return normalizedRule
         }
         _rewriteRulesSnapshot = _rewriteConfig.rules
+        _debugConfig.isEnabled = loadPersistedDebugEnabled()
+        _debugConfig.rules = loadPersistedDebugRules()
+        _debugRulesSnapshot = _debugConfig.rules
     }
     
     // MARK: - Delay Injection
@@ -232,4 +239,71 @@ final class NetworkInjectionManager: @unchecked Sendable {
             )
         }
     }
+
+    func setDebugConfig(_ config: NetworkDebugConfig) {
+        queue.sync(flags: .barrier) {
+            let previousRules = _debugConfig.rules
+            let previousEnabled = _debugConfig.isEnabled
+            _debugConfig = config
+            _debugRulesSnapshot = config.rules
+            if previousRules != config.rules {
+                persistDebugRules(config.rules)
+            }
+            if previousEnabled != config.isEnabled {
+                UserDefaults.standard.set(config.isEnabled, forKey: PersistenceKeys.debugEnabled)
+            }
+        }
+    }
+    
+    func getDebugConfig() -> NetworkDebugConfig {
+        return queue.sync { _debugConfig }
+    }
+    
+    func matchingDebugRule(for request: URLRequest) -> NetworkDebugRule? {
+        guard let url = request.url else { return nil }
+        let (isEnabled, rules): (Bool, [NetworkDebugRule]) = queue.sync {
+            (_debugConfig.isEnabled, _debugRulesSnapshot)
+        }
+        guard isEnabled else { return nil }
+
+        let requestURLLowercased = url.absoluteString.lowercased()
+        let requestMethod = HTTPMethod(rawValue: (request.httpMethod ?? HTTPMethod.get.rawValue).uppercased()) ?? .get
+        
+        let config = NetworkDebugConfig(isEnabled: isEnabled, rules: rules)
+        for rule in rules {
+            if config.matchesRule(
+                rule,
+                requestURLLowercased: requestURLLowercased,
+                requestURL: url,
+                requestMethod: requestMethod
+            ) {
+                return rule
+            }
+        }
+        return nil
+    }
+
+    private func loadPersistedDebugEnabled() -> Bool {
+        UserDefaults.standard.bool(forKey: PersistenceKeys.debugEnabled)
+    }
+
+    private func loadPersistedDebugRules() -> [NetworkDebugRule] {
+        if let data = UserDefaults.standard.data(forKey: PersistenceKeys.debugRules),
+           let decoded = try? JSONDecoder().decode([NetworkDebugRule].self, from: data) {
+            return decoded
+        }
+        return []
+    }
+
+    private func persistDebugRules(_ rules: [NetworkDebugRule]) {
+        if rules.isEmpty {
+            UserDefaults.standard.removeObject(forKey: PersistenceKeys.debugRules)
+            return
+        }
+
+        if let encoded = try? JSONEncoder().encode(rules) {
+            UserDefaults.standard.set(encoded, forKey: PersistenceKeys.debugRules)
+        }
+    }
 }
+

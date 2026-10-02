@@ -329,3 +329,65 @@ public struct ResponseBodyRewriteConfig: Sendable {
         }
     }
 }
+
+/// A single rule for network debugging (breakpoints).
+public struct NetworkDebugRule: Sendable, Equatable, Codable, Identifiable {
+    public var id: UUID
+    /// URL pattern to match (supports wildcard `*` and `?` or plain substring)
+    public var urlPattern: String
+    /// HTTP method to match (`nil` means all methods)
+    public var httpMethod: HTTPMethod?
+    /// Whether this rule is active
+    public var isEnabled: Bool
+
+    public init(
+        id: UUID = UUID(),
+        urlPattern: String,
+        httpMethod: HTTPMethod? = nil,
+        isEnabled: Bool = true
+    ) {
+        self.id = id
+        self.urlPattern = urlPattern
+        self.httpMethod = httpMethod
+        self.isEnabled = isEnabled
+    }
+}
+
+/// Configuration for network debugging and breakpoints
+public struct NetworkDebugConfig: Sendable, Equatable {
+    /// Whether network debugging is globally enabled
+    public var isEnabled: Bool
+    /// Ordered list of debug rules
+    public var rules: [NetworkDebugRule]
+
+    public init(
+        isEnabled: Bool = false,
+        rules: [NetworkDebugRule] = []
+    ) {
+        self.isEnabled = isEnabled
+        self.rules = rules
+    }
+
+    /// Check if a rule matches the given request
+    func matchesRule(
+        _ rule: NetworkDebugRule,
+        requestURLLowercased: String,
+        requestURL: URL,
+        requestMethod: HTTPMethod
+    ) -> Bool {
+        guard rule.isEnabled else { return false }
+        if let allowedMethod = rule.httpMethod, allowedMethod != requestMethod {
+            return false
+        }
+        if rule.urlPattern.contains("*") || rule.urlPattern.contains("?") {
+            return requestURL.matches(
+                wildcardPattern: rule.urlPattern,
+                strategy: .full,
+                queryStrategy: .exact
+            )
+        } else {
+            return requestURLLowercased.contains(rule.urlPattern.lowercased())
+        }
+    }
+}
+
