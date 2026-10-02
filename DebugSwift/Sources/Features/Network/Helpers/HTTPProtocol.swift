@@ -811,101 +811,8 @@ extension CustomHTTPProtocol: URLSessionDataDelegate {
             }
 
             if self.isDebuggingResponse {
-                let action = NetworkBreakpointManager.shared.handleResponseBreakpoint(
-                    request: self.request,
-                    response: self.response,
-                    data: self.data
-                )
-                switch action {
-                case .abort:
-                    let abortError = NSError(
-                        domain: NSURLErrorDomain,
-                        code: NSURLErrorCancelled,
-                        userInfo: [NSLocalizedDescriptionKey: "Response cancelled by Network Breakpoint."]
-                    )
-                    self.error = abortError
-                    self.client?.urlProtocol(self, didFailWithError: abortError)
-                    self.session?.finishTasksAndInvalidate()
-                    self.session = nil
-                    return
-                case .resume(let statusCode, let modifiedHeaders, let modifiedBody):
-                    let finalCode = statusCode ?? self.response?.statusCode ?? 200
-                    var headers = modifiedHeaders ?? (self.headersToString(self.response?.allHeaderFields) ?? [:])
-                    headers = headers.filter { $0.key.caseInsensitiveCompare("Content-Length") != .orderedSame }
-                    let finalData = modifiedBody ?? self.data
-                    let responseURL = self.response?.url ?? self.request.url!
-                    let finalResponse = HTTPURLResponse(
-                        url: responseURL,
-                        statusCode: finalCode,
-                        httpVersion: "HTTP/1.1",
-                        headerFields: headers
-                    ) ?? self.response
-
-                    self.response = finalResponse
-                    self.data = finalData
-
-                    if let finalResponse {
-                        DebugSwift.Network.shared.delegate?.urlSession(
-                            self,
-                            didReceive: finalResponse
-                        )
-                        self.client?.urlProtocol(self, didReceive: finalResponse, cacheStoragePolicy: self.cachePolicy)
-                    }
-
-                    DebugSwift.Network.shared.delegate?.urlSession(
-                        self,
-                        didReceive: finalData
-                    )
-                    self.client?.urlProtocol(self, didLoad: finalData)
-                    DebugSwift.Network.shared.delegate?.didFinishLoading(self)
-                    self.client?.urlProtocolDidFinishLoading(self)
-
-                    if self.cachePolicy == .allowed {
-                        URLCache.customHttp.storeIfNeeded(for: task, data: finalData)
-                    }
-
-                    self.session?.finishTasksAndInvalidate()
-                    self.session = nil
-                    return
-
-                case .mock(let statusCode, let headers, let body):
-                    var finalHeaders = headers
-                    finalHeaders = finalHeaders.filter { $0.key.caseInsensitiveCompare("Content-Length") != .orderedSame }
-                    let responseURL = self.response?.url ?? self.request.url!
-                    let finalResponse = HTTPURLResponse(
-                        url: responseURL,
-                        statusCode: statusCode,
-                        httpVersion: "HTTP/1.1",
-                        headerFields: finalHeaders
-                    ) ?? self.response
-
-                    self.response = finalResponse
-                    self.data = body
-
-                    if let finalResponse {
-                        DebugSwift.Network.shared.delegate?.urlSession(
-                            self,
-                            didReceive: finalResponse
-                        )
-                        self.client?.urlProtocol(self, didReceive: finalResponse, cacheStoragePolicy: self.cachePolicy)
-                    }
-
-                    DebugSwift.Network.shared.delegate?.urlSession(
-                        self,
-                        didReceive: body
-                    )
-                    self.client?.urlProtocol(self, didLoad: body)
-                    DebugSwift.Network.shared.delegate?.didFinishLoading(self)
-                    self.client?.urlProtocolDidFinishLoading(self)
-
-                    if self.cachePolicy == .allowed {
-                        URLCache.customHttp.storeIfNeeded(for: task, data: body)
-                    }
-
-                    self.session?.finishTasksAndInvalidate()
-                    self.session = nil
-                    return
-                }
+                self.processResponseBreakpoint(task: task)
+                return
             }
             
             if let matchedRewriteRule = self.matchedRewriteRule {
@@ -930,6 +837,79 @@ extension CustomHTTPProtocol: URLSessionDataDelegate {
             self.session?.finishTasksAndInvalidate()
             self.session = nil
         }
+    }
+
+    private func processResponseBreakpoint(task: URLSessionTask) {
+        let action = NetworkBreakpointManager.shared.handleResponseBreakpoint(
+            request: self.request,
+            response: self.response,
+            data: self.data
+        )
+        switch action {
+        case .abort:
+            abortResponseBreakpoint()
+        case .resume(let statusCode, let modifiedHeaders, let modifiedBody):
+            let finalCode = statusCode ?? self.response?.statusCode ?? 200
+            let rawHeaders = modifiedHeaders ?? (self.headersToString(self.response?.allHeaderFields) ?? [:])
+            let finalData = modifiedBody ?? self.data
+            deliverBreakpointResponse(statusCode: finalCode, headers: rawHeaders, data: finalData, task: task)
+        case .mock(let statusCode, let headers, let body):
+            deliverBreakpointResponse(statusCode: statusCode, headers: headers, data: body, task: task)
+        }
+    }
+
+    private func abortResponseBreakpoint() {
+        let abortError = NSError(
+            domain: NSURLErrorDomain,
+            code: NSURLErrorCancelled,
+            userInfo: [NSLocalizedDescriptionKey: "Response cancelled by Network Breakpoint."]
+        )
+        self.error = abortError
+        self.client?.urlProtocol(self, didFailWithError: abortError)
+        self.session?.finishTasksAndInvalidate()
+        self.session = nil
+    }
+
+    private func deliverBreakpointResponse(
+        statusCode: Int,
+        headers: [String: String],
+        data: Data,
+        task: URLSessionTask
+    ) {
+        let filteredHeaders = headers.filter { $0.key.caseInsensitiveCompare("Content-Length") != .orderedSame }
+        let responseURL = self.response?.url ?? self.request.url!
+        let finalResponse = HTTPURLResponse(
+            url: responseURL,
+            statusCode: statusCode,
+            httpVersion: "HTTP/1.1",
+            headerFields: filteredHeaders
+        ) ?? self.response
+
+        self.response = finalResponse
+        self.data = data
+
+        if let finalResponse {
+            DebugSwift.Network.shared.delegate?.urlSession(
+                self,
+                didReceive: finalResponse
+            )
+            self.client?.urlProtocol(self, didReceive: finalResponse, cacheStoragePolicy: self.cachePolicy)
+        }
+
+        DebugSwift.Network.shared.delegate?.urlSession(
+            self,
+            didReceive: data
+        )
+        self.client?.urlProtocol(self, didLoad: data)
+        DebugSwift.Network.shared.delegate?.didFinishLoading(self)
+        self.client?.urlProtocolDidFinishLoading(self)
+
+        if self.cachePolicy == .allowed {
+            URLCache.customHttp.storeIfNeeded(for: task, data: data)
+        }
+
+        self.session?.finishTasksAndInvalidate()
+        self.session = nil
     }
 }
 
