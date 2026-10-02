@@ -8,26 +8,18 @@
 import UIKit
 
 final class NetworkDebugSettingsController: BaseTableController {
-    private var debugConfig: NetworkDebugConfig {
-        NetworkInjectionManager.shared.getDebugConfig()
-    }
-
+    private let viewModel: NetworkDebugSettingsViewModel
     private let searchController = UISearchController(searchResultsController: nil)
-    private var searchText: String = ""
     private var heroHeaderView: HeroHeaderView?
 
-    private var isSearching: Bool {
-        searchController.isActive
+    init(viewModel: NetworkDebugSettingsViewModel = NetworkDebugSettingsViewModel()) {
+        self.viewModel = viewModel
+        super.init()
     }
 
-    private var filteredRules: [NetworkDebugRule] {
-        let rules = debugConfig.rules
-        guard !searchText.isEmpty else { return rules }
-        return rules.filter { rule in
-            let patternMatch = rule.urlPattern.localizedCaseInsensitiveContains(searchText)
-            let methodMatch = rule.httpMethod?.rawValue.localizedCaseInsensitiveContains(searchText) == true
-            return patternMatch || methodMatch
-        }
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
     }
 
     override func viewDidLoad() {
@@ -35,6 +27,7 @@ final class NetworkDebugSettingsController: BaseTableController {
         setupUI()
         setupTableHeader()
         setupSearchController()
+        bindViewModel()
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -48,12 +41,21 @@ final class NetworkDebugSettingsController: BaseTableController {
         updateHeaderViewHeight()
     }
 
+    private func bindViewModel() {
+        viewModel.onStateUpdated = { [weak self] in
+            guard let self = self else { return }
+            self.tableView.reloadData()
+            self.updateHeaderView()
+        }
+    }
+
     private func setupUI() {
         title = "Network Debug"
         view.backgroundColor = .black
         tableView.backgroundColor = .black
         tableView.separatorColor = .darkGray
-        tableView.register(UITableViewCell.self, forCellReuseIdentifier: "RuleCell")
+        tableView.register(NetworkRuleItemCell.self, forCellReuseIdentifier: NetworkRuleItemCell.identifier)
+        tableView.register(NetworkRuleEmptyCell.self, forCellReuseIdentifier: NetworkRuleEmptyCell.identifier)
 
         let addButton = UIBarButtonItem(
             barButtonSystemItem: .add,
@@ -74,14 +76,10 @@ final class NetworkDebugSettingsController: BaseTableController {
         header.configure(
             title: "Network Debug",
             description: "Pause and inspect requests & responses matching rules.",
-            isEnabled: debugConfig.isEnabled
+            isEnabled: viewModel.isMasterEnabled
         )
         header.onMasterToggleChanged = { [weak self] isEnabled in
-            guard let self = self else { return }
-            var config = self.debugConfig
-            config.isEnabled = isEnabled
-            NetworkInjectionManager.shared.setDebugConfig(config)
-            self.updateHeaderView()
+            self?.viewModel.setMasterEnabled(isEnabled)
         }
         self.heroHeaderView = header
         tableView.tableHeaderView = header
@@ -100,14 +98,14 @@ final class NetworkDebugSettingsController: BaseTableController {
     }
 
     private func updateHeaderView() {
-        if isSearching {
+        if viewModel.isSearching {
             tableView.tableHeaderView = nil
         } else {
             guard let header = heroHeaderView else { return }
             header.configure(
                 title: "Network Debug",
                 description: "Pause and inspect requests & responses matching rules.",
-                isEnabled: debugConfig.isEnabled
+                isEnabled: viewModel.isMasterEnabled
             )
             tableView.tableHeaderView = header
             updateHeaderViewHeight()
@@ -115,7 +113,7 @@ final class NetworkDebugSettingsController: BaseTableController {
     }
 
     private func updateHeaderViewHeight() {
-        guard !isSearching, let headerView = tableView.tableHeaderView as? HeroHeaderView else { return }
+        guard !viewModel.isSearching, let headerView = tableView.tableHeaderView as? HeroHeaderView else { return }
         headerView.frame.size.width = tableView.bounds.width
 
         let targetSize = CGSize(width: tableView.bounds.width, height: UIView.layoutFittingCompressedSize.height)
@@ -131,50 +129,56 @@ final class NetworkDebugSettingsController: BaseTableController {
         }
     }
 
-    // MARK: - Table view data source
+    // MARK: - UITableViewDataSource
 
     override func numberOfSections(in tableView: UITableView) -> Int {
         return 1
     }
 
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        return max(filteredRules.count, 1)
+        return max(viewModel.numberOfRules, 1)
     }
 
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-        let cell = UITableViewCell(style: .subtitle, reuseIdentifier: "RuleCell")
-        cell.backgroundColor = .black
-        cell.textLabel?.textColor = .white
-        cell.detailTextLabel?.textColor = .lightGray
-
-        let rules = filteredRules
-        guard !rules.isEmpty else {
-            if !searchText.isEmpty {
-                cell.textLabel?.text = "No Rules Found"
-                cell.detailTextLabel?.text = "No rules match \"\(searchText)\""
-            } else {
-                cell.textLabel?.text = "No Network Debug Rules"
-                cell.detailTextLabel?.text = "Tap + to add a rule"
+        guard viewModel.numberOfRules > 0 else {
+            guard let cell = tableView.dequeueReusableCell(
+                withIdentifier: NetworkRuleEmptyCell.identifier,
+                for: indexPath
+            ) as? NetworkRuleEmptyCell else {
+                return UITableViewCell()
             }
-            cell.selectionStyle = .none
-            cell.accessoryView = nil
+
+            if viewModel.isSearching {
+                cell.configure(
+                    title: "No Rules Found",
+                    subtitle: "No rules match \"\(viewModel.searchText)\""
+                )
+            } else {
+                cell.configure(
+                    title: "No Network Debug Rules",
+                    subtitle: "Tap + to add a rule"
+                )
+            }
             return cell
         }
 
-        let rule = rules[indexPath.row]
-        cell.textLabel?.text = rule.urlPattern
-        cell.textLabel?.numberOfLines = 2
-        cell.textLabel?.lineBreakMode = .byTruncatingHead
+        guard let cell = tableView.dequeueReusableCell(
+            withIdentifier: NetworkRuleItemCell.identifier,
+            for: indexPath
+        ) as? NetworkRuleItemCell,
+              let rule = viewModel.rule(at: indexPath.row) else {
+            return UITableViewCell()
+        }
 
         let method = rule.httpMethod?.rawValue ?? "All Methods"
-        cell.detailTextLabel?.text = "\(method) • Breakpoint Active"
-
-        let toggle = UISwitch()
-        toggle.isOn = rule.isEnabled
-        toggle.tag = indexPath.row
-        toggle.addTarget(self, action: #selector(ruleToggleChanged(_:)), for: .valueChanged)
-        cell.accessoryView = toggle
-        cell.selectionStyle = .none
+        cell.configure(
+            title: rule.urlPattern,
+            subtitle: "\(method) • Breakpoint Active",
+            isOn: rule.isEnabled,
+            isSelectable: false
+        ) { [weak self] isOn in
+            self?.viewModel.setRuleEnabled(at: indexPath.row, isEnabled: isOn)
+        }
         return cell
     }
 
@@ -184,30 +188,15 @@ final class NetworkDebugSettingsController: BaseTableController {
     }
 
     override func tableView(_ tableView: UITableView, canEditRowAt indexPath: IndexPath) -> Bool {
-        return !filteredRules.isEmpty
+        return viewModel.numberOfRules > 0
     }
 
     override func tableView(_ tableView: UITableView, commit editingStyle: UITableViewCell.EditingStyle, forRowAt indexPath: IndexPath) {
-        guard editingStyle == .delete, !filteredRules.isEmpty else { return }
-        let ruleToDelete = filteredRules[indexPath.row]
-        var config = debugConfig
-        config.rules.removeAll { $0.id == ruleToDelete.id }
-        NetworkInjectionManager.shared.setDebugConfig(config)
-        tableView.reloadData()
+        guard editingStyle == .delete, viewModel.numberOfRules > 0 else { return }
+        viewModel.deleteRule(at: indexPath.row)
     }
 
     // MARK: - Actions
-
-    @objc private func ruleToggleChanged(_ sender: UISwitch) {
-        let row = sender.tag
-        guard row < filteredRules.count else { return }
-        let targetRule = filteredRules[row]
-        var config = debugConfig
-        if let index = config.rules.firstIndex(where: { $0.id == targetRule.id }) {
-            config.rules[index].isEnabled = sender.isOn
-            NetworkInjectionManager.shared.setDebugConfig(config)
-        }
-    }
 
     @objc private func addRuleTapped() {
         let alert = UIAlertController(
@@ -231,20 +220,13 @@ final class NetworkDebugSettingsController: BaseTableController {
 
         alert.addAction(UIAlertAction(title: "Add", style: .default) { [weak self, weak alert] _ in
             guard let self = self,
-                  let pattern = alert?.textFields?[0].text?.trimmingCharacters(in: .whitespaces),
-                  !pattern.isEmpty else { return }
+                  let pattern = alert?.textFields?[0].text,
+                  !pattern.trimmingCharacters(in: .whitespaces).isEmpty else { return }
 
             let rawMethod = alert?.textFields?[1].text?.trimmingCharacters(in: .whitespaces).uppercased() ?? ""
             let method = HTTPMethod(rawValue: rawMethod)
 
-            var config = self.debugConfig
-            let newRule = NetworkDebugRule(urlPattern: pattern, httpMethod: method, isEnabled: true)
-            config.rules.append(newRule)
-            config.isEnabled = true
-            NetworkInjectionManager.shared.setDebugConfig(config)
-
-            self.tableView.reloadData()
-            self.updateHeaderView()
+            self.viewModel.addRule(urlPattern: pattern, method: method)
         })
 
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
@@ -252,7 +234,7 @@ final class NetworkDebugSettingsController: BaseTableController {
     }
 
     @objc private func clearAllTapped() {
-        guard !debugConfig.rules.isEmpty else { return }
+        guard viewModel.allRules.count > 0 else { return }
         let alert = UIAlertController(
             title: "Clear All Debug Rules?",
             message: "This will remove all breakpoint rules.",
@@ -260,11 +242,7 @@ final class NetworkDebugSettingsController: BaseTableController {
         )
 
         alert.addAction(UIAlertAction(title: "Clear All", style: .destructive) { [weak self] _ in
-            guard let self = self else { return }
-            var config = self.debugConfig
-            config.rules.removeAll()
-            NetworkInjectionManager.shared.setDebugConfig(config)
-            self.tableView.reloadData()
+            self?.viewModel.clearAllRules()
         })
 
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
@@ -274,8 +252,6 @@ final class NetworkDebugSettingsController: BaseTableController {
 
 extension NetworkDebugSettingsController: UISearchResultsUpdating {
     func updateSearchResults(for searchController: UISearchController) {
-        searchText = searchController.searchBar.text?.trimmingCharacters(in: .whitespaces) ?? ""
-        updateHeaderView()
-        tableView.reloadData()
+        viewModel.updateSearch(text: searchController.searchBar.text ?? "")
     }
 }

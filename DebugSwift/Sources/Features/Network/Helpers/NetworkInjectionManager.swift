@@ -173,6 +173,7 @@ final class NetworkInjectionManager: @unchecked Sendable {
 
     func setRewriteMultipleMatchEnabled(_ isEnabled: Bool) {
         UserDefaults.standard.set(isEnabled, forKey: PersistenceKeys.rewriteMultipleMatchEnabled)
+        UserDefaults.standard.synchronize()
     }
     
     func isRewriteMultipleMatchEnabled() -> Bool {
@@ -181,6 +182,7 @@ final class NetworkInjectionManager: @unchecked Sendable {
 
     func setRewriteAutoEnableOnRun(_ isEnabled: Bool) {
         UserDefaults.standard.set(isEnabled, forKey: PersistenceKeys.rewriteAutoEnableOnRun)
+        UserDefaults.standard.synchronize()
     }
 
     func shouldAutoEnableRewriteOnRun() -> Bool {
@@ -189,6 +191,7 @@ final class NetworkInjectionManager: @unchecked Sendable {
     
     func setRewriteShortCircuitEnabled(_ isEnabled: Bool) {
         UserDefaults.standard.set(isEnabled, forKey: PersistenceKeys.rewriteShortCircuitEnabled)
+        UserDefaults.standard.synchronize()
     }
     
     func isRewriteShortCircuitEnabled() -> Bool {
@@ -209,11 +212,13 @@ final class NetworkInjectionManager: @unchecked Sendable {
     private func persistRewriteRules(_ rules: [ResponseBodyRewriteRule]) {
         if rules.isEmpty {
             UserDefaults.standard.removeObject(forKey: PersistenceKeys.rewriteRules)
+            UserDefaults.standard.synchronize()
             return
         }
         
         if let encoded = try? JSONEncoder().encode(rules) {
             UserDefaults.standard.set(encoded, forKey: PersistenceKeys.rewriteRules)
+            UserDefaults.standard.synchronize()
         }
     }
 
@@ -251,6 +256,7 @@ final class NetworkInjectionManager: @unchecked Sendable {
             }
             if previousEnabled != config.isEnabled {
                 UserDefaults.standard.set(config.isEnabled, forKey: PersistenceKeys.debugEnabled)
+                UserDefaults.standard.synchronize()
             }
         }
     }
@@ -298,11 +304,13 @@ final class NetworkInjectionManager: @unchecked Sendable {
     private func persistDebugRules(_ rules: [NetworkDebugRule]) {
         if rules.isEmpty {
             UserDefaults.standard.removeObject(forKey: PersistenceKeys.debugRules)
+            UserDefaults.standard.synchronize()
             return
         }
 
         if let encoded = try? JSONEncoder().encode(rules) {
             UserDefaults.standard.set(encoded, forKey: PersistenceKeys.debugRules)
+            UserDefaults.standard.synchronize()
         }
     }
 }
