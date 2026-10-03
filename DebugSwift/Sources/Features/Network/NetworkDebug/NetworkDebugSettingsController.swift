@@ -246,6 +246,9 @@ final class NetworkDebugSettingsController: BaseTableController {
         })
 
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        if let popover = alert.popoverPresentationController {
+            popover.barButtonItem = navigationItem.rightBarButtonItems?.last
+        }
         present(alert, animated: true)
     }
 }

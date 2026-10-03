@@ -19,7 +19,9 @@ final class NetworkBreakpointManager: @unchecked Sendable {
             return .resume(statusCode: nil, modifiedHeaders: nil, modifiedBody: nil)
         }
 
-        presentationLock.wait()
+        guard presentationLock.wait(timeout: .now() + 60) == .success else {
+            return .resume(statusCode: nil, modifiedHeaders: nil, modifiedBody: nil)
+        }
         defer { presentationLock.signal() }
 
         let semaphore = DispatchSemaphore(value: 0)
@@ -32,7 +34,9 @@ final class NetworkBreakpointManager: @unchecked Sendable {
         let bodyString = bodyData.flatMap { String(data: $0, encoding: .utf8) } ?? ""
 
         DispatchQueue.main.async {
-            guard let topVC = UIApplication.topViewController() else {
+            guard let topVC = UIApplication.topViewController(),
+                  topVC.view.window != nil,
+                  !topVC.isBeingDismissed else {
                 semaphore.signal()
                 return
             }
@@ -63,7 +67,13 @@ final class NetworkBreakpointManager: @unchecked Sendable {
             topVC.present(nav, animated: true)
         }
 
-        semaphore.wait()
+        let waitResult = semaphore.wait(timeout: .now() + 60)
+        if waitResult == .timedOut {
+            DispatchQueue.main.async {
+                UIApplication.topViewController()?.dismiss(animated: true)
+            }
+            return .resume(statusCode: nil, modifiedHeaders: nil, modifiedBody: bodyData)
+        }
         return actionBox.get()
     }
 
@@ -76,7 +86,9 @@ final class NetworkBreakpointManager: @unchecked Sendable {
             return .resume(statusCode: response?.statusCode, modifiedHeaders: nil, modifiedBody: nil)
         }
 
-        presentationLock.wait()
+        guard presentationLock.wait(timeout: .now() + 60) == .success else {
+            return .resume(statusCode: response?.statusCode, modifiedHeaders: nil, modifiedBody: nil)
+        }
         defer { presentationLock.signal() }
 
         let semaphore = DispatchSemaphore(value: 0)
@@ -93,7 +105,9 @@ final class NetworkBreakpointManager: @unchecked Sendable {
         let bodyString = String(data: data, encoding: .utf8) ?? ""
 
         DispatchQueue.main.async {
-            guard let topVC = UIApplication.topViewController() else {
+            guard let topVC = UIApplication.topViewController(),
+                  topVC.view.window != nil,
+                  !topVC.isBeingDismissed else {
                 semaphore.signal()
                 return
             }
@@ -124,7 +138,13 @@ final class NetworkBreakpointManager: @unchecked Sendable {
             topVC.present(nav, animated: true)
         }
 
-        semaphore.wait()
+        let waitResult = semaphore.wait(timeout: .now() + 60)
+        if waitResult == .timedOut {
+            DispatchQueue.main.async {
+                UIApplication.topViewController()?.dismiss(animated: true)
+            }
+            return .resume(statusCode: response?.statusCode, modifiedHeaders: nil, modifiedBody: nil)
+        }
         return actionBox.get()
     }
 }

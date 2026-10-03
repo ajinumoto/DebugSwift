@@ -151,8 +151,9 @@ public final class CustomHTTPProtocol: URLProtocol, @unchecked Sendable {
 
         Debug.print(request.requestId)
         
-        // Check for Network Debug Breakpoint (Request Phase)
-        if let _ = NetworkInjectionManager.shared.matchingDebugRule(for: request) {
+        // Check for Network Debug Breakpoint (Request Phase) - Fast Path (Zero Impact when disabled)
+        if NetworkInjectionManager.shared.isDebugEnabledFastPath,
+           let _ = NetworkInjectionManager.shared.matchingDebugRule(for: request) {
             let action = NetworkBreakpointManager.shared.handleRequestBreakpoint(request: request)
             switch action {
             case .abort:
@@ -169,9 +170,8 @@ public final class CustomHTTPProtocol: URLProtocol, @unchecked Sendable {
                 if let modifiedHeaders = modifiedHeaders {
                     newRequest.allHTTPHeaderFields = modifiedHeaders
                 }
-                if let modifiedBody = modifiedBody {
-                    newRequest.httpBody = modifiedBody
-                }
+                let existingBody = request.httpBody ?? request.httpBodyStream?.toData()
+                newRequest.httpBody = modifiedBody ?? existingBody
                 self.isDebuggingResponse = true
             }
         }
@@ -811,7 +811,9 @@ extension CustomHTTPProtocol: URLSessionDataDelegate {
             }
 
             if self.isDebuggingResponse {
-                self.processResponseBreakpoint(task: task)
+                DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                    self?.processResponseBreakpoint(task: task)
+                }
                 return
             }
             
@@ -877,7 +879,10 @@ extension CustomHTTPProtocol: URLSessionDataDelegate {
         task: URLSessionTask
     ) {
         let filteredHeaders = headers.filter { $0.key.caseInsensitiveCompare("Content-Length") != .orderedSame }
-        let responseURL = self.response?.url ?? self.request.url!
+        guard let responseURL = self.response?.url ?? self.request.url else {
+            abortResponseBreakpoint()
+            return
+        }
         let finalResponse = HTTPURLResponse(
             url: responseURL,
             statusCode: statusCode,

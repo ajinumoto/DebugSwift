@@ -26,8 +26,7 @@ final class NetworkBreakpointSheetViewController: BaseController, UIAdaptivePres
     private let initialHeaders: [String: String]
     private let initialBody: String
 
-    var onAction: ((BreakpointAction) -> Void)?
-    private var hasHandledAction = false
+    private let coordinator: BreakpointSheetCoordinator
 
     // MARK: - UI Components
     private let scrollView = UIScrollView()
@@ -60,7 +59,7 @@ final class NetworkBreakpointSheetViewController: BaseController, UIAdaptivePres
         statusCode: Int?,
         headers: [String: String],
         body: String,
-        onAction: @escaping (BreakpointAction) -> Void
+        onAction: @escaping @Sendable (BreakpointAction) -> Void
     ) {
         self.phase = phase
         self.requestURL = url
@@ -68,7 +67,10 @@ final class NetworkBreakpointSheetViewController: BaseController, UIAdaptivePres
         self.initialStatusCode = statusCode
         self.initialHeaders = headers
         self.initialBody = body
-        self.onAction = onAction
+        self.coordinator = BreakpointSheetCoordinator(
+            defaultAction: .resume(statusCode: statusCode, modifiedHeaders: nil, modifiedBody: nil),
+            onAction: onAction
+        )
         super.init()
     }
 
@@ -335,50 +337,40 @@ final class NetworkBreakpointSheetViewController: BaseController, UIAdaptivePres
 
     // MARK: - Actions
 
-    @objc private func resumeTapped() {
-        guard !hasHandledAction else { return }
-        hasHandledAction = true
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+        coordinator.fallbackAction()
+    }
 
+    @objc private func resumeTapped() {
         let statusCode = Int(codeTextField.text?.trimmingCharacters(in: .whitespaces) ?? "")
         let headers = Self.stringToHeaders(headerTextView.text)
         let bodyData = bodyTextView.text.data(using: .utf8)
 
-        dismiss(animated: true) { [weak self] in
-            self?.onAction?(.resume(statusCode: statusCode, modifiedHeaders: headers, modifiedBody: bodyData))
-        }
+        coordinator.handleAction(.resume(statusCode: statusCode, modifiedHeaders: headers.isEmpty ? nil : headers, modifiedBody: bodyData))
+        dismiss(animated: true)
     }
 
     @objc private func mockTapped() {
-        guard !hasHandledAction else { return }
-        hasHandledAction = true
-
         let statusCode = Int(codeTextField.text?.trimmingCharacters(in: .whitespaces) ?? "") ?? 200
         let headers = Self.stringToHeaders(headerTextView.text)
         let bodyData = bodyTextView.text.data(using: .utf8) ?? Data()
 
-        dismiss(animated: true) { [weak self] in
-            self?.onAction?(.mock(statusCode: statusCode, headers: headers, body: bodyData))
-        }
+        coordinator.handleAction(.mock(statusCode: statusCode, headers: headers, body: bodyData))
+        dismiss(animated: true)
     }
 
     @objc private func abortTapped() {
-        guard !hasHandledAction else { return }
-        hasHandledAction = true
-
-        dismiss(animated: true) { [weak self] in
-            self?.onAction?(.abort)
-        }
+        coordinator.handleAction(.abort)
+        dismiss(animated: true)
     }
 
     func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
-        guard !hasHandledAction else { return }
-        hasHandledAction = true
-
         let statusCode = Int(codeTextField.text?.trimmingCharacters(in: .whitespaces) ?? "")
         let headers = Self.stringToHeaders(headerTextView.text)
         let bodyData = bodyTextView.text.data(using: .utf8)
 
-        onAction?(.resume(statusCode: statusCode, modifiedHeaders: headers.isEmpty ? nil : headers, modifiedBody: bodyData))
+        coordinator.handleAction(.resume(statusCode: statusCode, modifiedHeaders: headers.isEmpty ? nil : headers, modifiedBody: bodyData))
     }
 
     // MARK: - Header Parsing Helpers
@@ -415,5 +407,39 @@ final class NetworkBreakpointSheetViewController: BaseController, UIAdaptivePres
             return raw
         }
         return prettyString
+    }
+}
+
+private final class BreakpointSheetCoordinator: @unchecked Sendable {
+    private let lock = NSLock()
+    private var hasHandled = false
+    private let defaultAction: BreakpointAction
+    private let onAction: (@Sendable (BreakpointAction) -> Void)?
+
+    init(defaultAction: BreakpointAction, onAction: (@Sendable (BreakpointAction) -> Void)?) {
+        self.defaultAction = defaultAction
+        self.onAction = onAction
+    }
+
+    func handleAction(_ action: BreakpointAction) {
+        lock.lock()
+        guard !hasHandled else {
+            lock.unlock()
+            return
+        }
+        hasHandled = true
+        lock.unlock()
+        onAction?(action)
+    }
+
+    func fallbackAction() {
+        lock.lock()
+        guard !hasHandled else {
+            lock.unlock()
+            return
+        }
+        hasHandled = true
+        lock.unlock()
+        onAction?(defaultAction)
     }
 }

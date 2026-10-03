@@ -28,6 +28,20 @@ final class NetworkInjectionManager: @unchecked Sendable {
     private var _debugConfig: NetworkDebugConfig = NetworkDebugConfig()
     private var _debugRulesSnapshot: [NetworkDebugRule] = []
     
+    private let fastPathLock = NSLock()
+    private var _isDebugEnabledFastPath: Bool = false
+    var isDebugEnabledFastPath: Bool {
+        fastPathLock.lock()
+        defer { fastPathLock.unlock() }
+        return _isDebugEnabledFastPath
+    }
+    
+    private func updateFastPath(enabled: Bool, hasRules: Bool) {
+        fastPathLock.lock()
+        _isDebugEnabledFastPath = enabled && hasRules
+        fastPathLock.unlock()
+    }
+    
     private init() {
         _rewriteConfig.isEnabled = shouldAutoEnableRewriteOnRun()
         _rewriteConfig.rules = loadPersistedRewriteRules().map { rule in
@@ -39,6 +53,7 @@ final class NetworkInjectionManager: @unchecked Sendable {
         _debugConfig.isEnabled = loadPersistedDebugEnabled()
         _debugConfig.rules = loadPersistedDebugRules()
         _debugRulesSnapshot = _debugConfig.rules
+        updateFastPath(enabled: _debugConfig.isEnabled, hasRules: !_debugRulesSnapshot.isEmpty)
     }
     
     // MARK: - Delay Injection
@@ -251,6 +266,7 @@ final class NetworkInjectionManager: @unchecked Sendable {
             let previousEnabled = _debugConfig.isEnabled
             _debugConfig = config
             _debugRulesSnapshot = config.rules
+            updateFastPath(enabled: config.isEnabled, hasRules: !config.rules.isEmpty)
             if previousRules != config.rules {
                 persistDebugRules(config.rules)
             }
@@ -266,18 +282,19 @@ final class NetworkInjectionManager: @unchecked Sendable {
     }
     
     func matchingDebugRule(for request: URLRequest) -> NetworkDebugRule? {
+        guard isDebugEnabledFastPath else { return nil }
         guard let url = request.url else { return nil }
         let (isEnabled, rules): (Bool, [NetworkDebugRule]) = queue.sync {
-            (_debugConfig.isEnabled, _debugRulesSnapshot)
+            guard _debugConfig.isEnabled else { return (false, []) }
+            return (true, _debugRulesSnapshot)
         }
-        guard isEnabled else { return nil }
+        guard isEnabled, !rules.isEmpty else { return nil }
 
         let requestURLLowercased = url.absoluteString.lowercased()
         let requestMethod = HTTPMethod(rawValue: (request.httpMethod ?? HTTPMethod.get.rawValue).uppercased()) ?? .get
         
-        let config = NetworkDebugConfig(isEnabled: isEnabled, rules: rules)
         for rule in rules {
-            if config.matchesRule(
+            if matchesDebugRule(
                 rule,
                 requestURLLowercased: requestURLLowercased,
                 requestURL: url,
@@ -287,6 +304,27 @@ final class NetworkInjectionManager: @unchecked Sendable {
             }
         }
         return nil
+    }
+
+    private func matchesDebugRule(
+        _ rule: NetworkDebugRule,
+        requestURLLowercased: String,
+        requestURL: URL,
+        requestMethod: HTTPMethod
+    ) -> Bool {
+        guard rule.isEnabled else { return false }
+        if let allowedMethod = rule.httpMethod, allowedMethod != requestMethod {
+            return false
+        }
+        if rule.urlPattern.contains("*") || rule.urlPattern.contains("?") {
+            return requestURL.matches(
+                wildcardPattern: rule.urlPattern,
+                strategy: .full,
+                queryStrategy: .exact
+            )
+        } else {
+            return requestURLLowercased.contains(rule.urlPattern.lowercased())
+        }
     }
 
     private func loadPersistedDebugEnabled() -> Bool {

@@ -422,6 +422,11 @@ final class ResponseModifierSettingsController: BaseTableController, UIDocumentP
             self?.importRewriteRulesCSV()
         })
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        if let popover = alert.popoverPresentationController {
+            popover.sourceView = tableView
+            let rect = tableView.rectForRow(at: IndexPath(row: 0, section: Section.data.rawValue))
+            popover.sourceRect = rect
+        }
         present(alert, animated: true)
     }
 
