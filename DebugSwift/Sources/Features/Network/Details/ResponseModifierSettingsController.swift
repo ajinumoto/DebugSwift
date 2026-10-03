@@ -16,18 +16,26 @@ final class ResponseModifierSettingsController: BaseTableController, UIDocumentP
         case apiRules
     }
 
-    private let viewModel: ResponseModifierSettingsViewModel
-    private let searchController = UISearchController(searchResultsController: nil)
-    private var heroHeaderView: HeroHeaderView?
-
-    init(viewModel: ResponseModifierSettingsViewModel = ResponseModifierSettingsViewModel()) {
-        self.viewModel = viewModel
-        super.init()
+    private var rewriteConfig: ResponseBodyRewriteConfig {
+        NetworkInjectionManager.shared.getRewriteConfig()
     }
 
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
+    private let searchController = UISearchController(searchResultsController: nil)
+    private var searchText: String = ""
+    private var heroHeaderView: HeroHeaderView?
+
+    private var isSearching: Bool {
+        return searchController.isActive
+    }
+
+    private var filteredRules: [ResponseBodyRewriteRule] {
+        let rules = rewriteConfig.rules
+        guard !searchText.isEmpty else { return rules }
+        return rules.filter { rule in
+            let patternMatch = rule.urlPattern.localizedCaseInsensitiveContains(searchText)
+            let methodMatch = rule.httpMethod?.rawValue.localizedCaseInsensitiveContains(searchText) == true
+            return patternMatch || methodMatch
+        }
     }
 
     override func viewDidLoad() {
@@ -35,7 +43,6 @@ final class ResponseModifierSettingsController: BaseTableController, UIDocumentP
         setupUI()
         setupTableHeader()
         setupSearchController()
-        bindViewModel()
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -49,23 +56,13 @@ final class ResponseModifierSettingsController: BaseTableController, UIDocumentP
         updateHeaderViewHeight()
     }
 
-    private func bindViewModel() {
-        viewModel.onStateUpdated = { [weak self] in
-            guard let self = self else { return }
-            self.tableView.reloadData()
-            self.updateHeaderView()
-        }
-    }
-
     private func setupUI() {
         title = "Response Modifier"
         view.backgroundColor = .black
         tableView.backgroundColor = .black
         tableView.separatorColor = .darkGray
         tableView.register(SettingCell.self, forCellReuseIdentifier: "SettingCell")
-        tableView.register(NetworkRuleItemCell.self, forCellReuseIdentifier: NetworkRuleItemCell.identifier)
-        tableView.register(NetworkRuleEmptyCell.self, forCellReuseIdentifier: NetworkRuleEmptyCell.identifier)
-
+        
         let addButton = UIBarButtonItem(
             barButtonSystemItem: .add,
             target: self,
@@ -83,7 +80,11 @@ final class ResponseModifierSettingsController: BaseTableController, UIDocumentP
     private func setupTableHeader() {
         let header = HeroHeaderView(frame: CGRect(x: 0, y: 0, width: tableView.frame.width, height: 120))
         header.onMasterToggleChanged = { [weak self] isEnabled in
-            self?.viewModel.isMasterEnabled = isEnabled
+            guard let self = self else { return }
+            var config = self.rewriteConfig
+            config.isEnabled = isEnabled
+            NetworkInjectionManager.shared.setRewriteConfig(config)
+            self.updateHeaderView()
         }
         self.heroHeaderView = header
         tableView.tableHeaderView = header
@@ -95,34 +96,34 @@ final class ResponseModifierSettingsController: BaseTableController, UIDocumentP
         searchController.searchBar.placeholder = "Search API Rules..."
         searchController.searchBar.searchTextField.textColor = .white
         searchController.searchBar.barStyle = .black
-
+        
         navigationItem.searchController = searchController
         navigationItem.hidesSearchBarWhenScrolling = false
         definesPresentationContext = true
     }
 
     private func updateHeaderView() {
-        if viewModel.isSearching {
+        if isSearching {
             tableView.tableHeaderView = nil
         } else {
             guard let header = heroHeaderView else { return }
-            header.configure(isEnabled: viewModel.isMasterEnabled)
+            header.configure(isEnabled: rewriteConfig.isEnabled)
             tableView.tableHeaderView = header
             updateHeaderViewHeight()
         }
     }
 
     private func updateHeaderViewHeight() {
-        guard !viewModel.isSearching, let headerView = tableView.tableHeaderView as? HeroHeaderView else { return }
+        guard !isSearching, let headerView = tableView.tableHeaderView as? HeroHeaderView else { return }
         headerView.frame.size.width = tableView.bounds.width
-
+        
         let targetSize = CGSize(width: tableView.bounds.width, height: UIView.layoutFittingCompressedSize.height)
         let size = headerView.systemLayoutSizeFitting(
             targetSize,
             withHorizontalFittingPriority: .required,
             verticalFittingPriority: .fittingSizeLevel
         )
-
+        
         if headerView.frame.size.height != size.height {
             headerView.frame.size.height = size.height
             tableView.tableHeaderView = headerView
@@ -130,12 +131,12 @@ final class ResponseModifierSettingsController: BaseTableController, UIDocumentP
     }
 
     override func numberOfSections(in tableView: UITableView) -> Int {
-        return viewModel.isSearching ? 1 : Section.allCases.count
+        return isSearching ? 1 : Section.allCases.count
     }
 
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        if viewModel.isSearching {
-            return max(viewModel.filteredRules.count, 1)
+        if isSearching {
+            return max(filteredRules.count, 1)
         }
         guard let sectionType = Section(rawValue: section) else { return 0 }
         switch sectionType {
@@ -146,12 +147,12 @@ final class ResponseModifierSettingsController: BaseTableController, UIDocumentP
         case .data:
             return 1
         case .apiRules:
-            return max(viewModel.allRules.count, 1)
+            return max(rewriteConfig.rules.count, 1)
         }
     }
 
     override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
-        if viewModel.isSearching {
+        if isSearching {
             return "API RULES"
         }
         guard let sectionType = Section(rawValue: section) else { return nil }
@@ -164,28 +165,28 @@ final class ResponseModifierSettingsController: BaseTableController, UIDocumentP
     }
 
     override func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
-        if viewModel.isSearching { return nil }
+        if isSearching { return nil }
         guard let sectionType = Section(rawValue: section), sectionType == .rules else { return nil }
         return "Warning: Broad wildcard patterns (such as *) and many response modifier rules can reduce network matching performance."
     }
 
     override func tableView(_ tableView: UITableView, heightForHeaderInSection section: Int) -> CGFloat {
-        if viewModel.isSearching {
+        if isSearching {
             return section == Section.apiRules.rawValue ? UITableView.automaticDimension : CGFloat.leastNormalMagnitude
         }
         return UITableView.automaticDimension
     }
 
     override func tableView(_ tableView: UITableView, heightForFooterInSection section: Int) -> CGFloat {
-        if viewModel.isSearching {
+        if isSearching {
             return CGFloat.leastNormalMagnitude
         }
         return UITableView.automaticDimension
     }
 
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-        if viewModel.isSearching {
-            return apiRuleCell(for: indexPath.row, in: tableView, indexPath: indexPath)
+        if isSearching {
+            return apiRuleCell(for: indexPath.row)
         }
         guard let section = Section(rawValue: indexPath.section) else {
             return UITableViewCell()
@@ -199,19 +200,19 @@ final class ResponseModifierSettingsController: BaseTableController, UIDocumentP
             if section == .rules {
                 if indexPath.row == 0 {
                     let toggle = UISwitch()
-                    toggle.isOn = viewModel.areAllRulesEnabled
-                    toggle.isEnabled = !viewModel.allRules.isEmpty
+                    toggle.isOn = areAllRulesEnabled()
+                    toggle.isEnabled = !rewriteConfig.rules.isEmpty
                     toggle.addTarget(self, action: #selector(allRulesToggleChanged(_:)), for: .valueChanged)
                     cell.configure(
                         title: "Enable All Rules",
                         iconName: "slider.horizontal.3",
                         iconBgColor: .systemPurple,
-                        detailText: viewModel.enabledRuleCountSummary,
+                        detailText: enabledRuleCountSummary(),
                         accessoryView: toggle
                     )
                 } else if indexPath.row == 1 {
                     let toggle = UISwitch()
-                    toggle.isOn = viewModel.isShortCircuitEnabled
+                    toggle.isOn = NetworkInjectionManager.shared.isRewriteShortCircuitEnabled()
                     toggle.addTarget(self, action: #selector(shortCircuitToggleChanged(_:)), for: .valueChanged)
                     cell.configure(
                         title: "Short-circuit Mode",
@@ -221,7 +222,7 @@ final class ResponseModifierSettingsController: BaseTableController, UIDocumentP
                     )
                 } else {
                     let toggle = UISwitch()
-                    toggle.isOn = viewModel.isMultipleMatchEnabled
+                    toggle.isOn = NetworkInjectionManager.shared.isRewriteMultipleMatchEnabled()
                     toggle.addTarget(self, action: #selector(multipleMatchToggleChanged(_:)), for: .valueChanged)
                     cell.configure(
                         title: "Enable Multiple Match",
@@ -232,7 +233,7 @@ final class ResponseModifierSettingsController: BaseTableController, UIDocumentP
                 }
             } else if section == .preferences {
                 let toggle = UISwitch()
-                toggle.isOn = viewModel.isAutoEnableOnRunEnabled
+                toggle.isOn = NetworkInjectionManager.shared.shouldAutoEnableRewriteOnRun()
                 toggle.addTarget(self, action: #selector(autoEnableToggleChanged(_:)), for: .valueChanged)
                 cell.configure(
                     title: "Auto-enable Every Run",
@@ -248,66 +249,56 @@ final class ResponseModifierSettingsController: BaseTableController, UIDocumentP
                 )
             }
             return cell
-
+            
         case .apiRules:
-            return apiRuleCell(for: indexPath.row, in: tableView, indexPath: indexPath)
+            return apiRuleCell(for: indexPath.row)
         }
     }
 
-    private func apiRuleCell(for row: Int, in tableView: UITableView, indexPath: IndexPath) -> UITableViewCell {
-        let rules = viewModel.filteredRules
+    private func apiRuleCell(for row: Int) -> UITableViewCell {
+        let cell = UITableViewCell(style: .subtitle, reuseIdentifier: "RuleCell")
+        cell.backgroundColor = .black
+        cell.textLabel?.textColor = .white
+        cell.detailTextLabel?.textColor = .lightGray
+
+        let rules = filteredRules
         guard !rules.isEmpty else {
-            guard let cell = tableView.dequeueReusableCell(
-                withIdentifier: NetworkRuleEmptyCell.identifier,
-                for: indexPath
-            ) as? NetworkRuleEmptyCell else {
-                return UITableViewCell()
-            }
-            if viewModel.isSearching {
-                cell.configure(
-                    title: "No Rules Found",
-                    subtitle: "No rules match \"\(viewModel.searchText)\""
-                )
+            if !searchText.isEmpty {
+                cell.textLabel?.text = "No Rules Found"
+                cell.detailTextLabel?.text = "No rules match \"\(searchText)\""
             } else {
-                cell.configure(
-                    title: "No Response Modifier Rules",
-                    subtitle: "Tap + to add a rule"
-                )
+                cell.textLabel?.text = "No Response Modifier Rules"
+                cell.detailTextLabel?.text = "Tap + to add a rule"
             }
+            cell.selectionStyle = .none
+            cell.accessoryView = nil
             return cell
         }
-
-        guard let cell = tableView.dequeueReusableCell(
-            withIdentifier: NetworkRuleItemCell.identifier,
-            for: indexPath
-        ) as? NetworkRuleItemCell else {
-            return UITableViewCell()
-        }
-
         let rule = rules[row]
+        let displayPattern = rule.urlPattern
+        cell.textLabel?.text = displayPattern
+        cell.textLabel?.numberOfLines = 2
+        cell.textLabel?.lineBreakMode = .byTruncatingHead
+        
         let method = rule.httpMethod?.rawValue ?? "All Methods"
-        let subtitle: String
         if let statusCode = rule.responseStatusCode {
-            subtitle = "\(method) • \(statusCode)"
+            cell.detailTextLabel?.text = "\(method) • \(statusCode)"
         } else {
-            subtitle = method
+            cell.detailTextLabel?.text = method
         }
-
-        cell.configure(
-            title: rule.urlPattern,
-            subtitle: subtitle,
-            isOn: rule.isEnabled,
-            isSelectable: true
-        ) { [weak self] isOn in
-            self?.viewModel.setRuleEnabled(at: row, isEnabled: isOn)
-        }
-
+        
+        let toggle = UISwitch()
+        toggle.isOn = rule.isEnabled
+        toggle.tag = row
+        toggle.addTarget(self, action: #selector(ruleToggleChanged(_:)), for: .valueChanged)
+        cell.accessoryView = toggle
+        cell.selectionStyle = .default
         return cell
     }
 
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
-        if viewModel.isSearching {
+        if isSearching {
             selectApiRule(at: indexPath.row)
             return
         }
@@ -343,9 +334,11 @@ final class ResponseModifierSettingsController: BaseTableController, UIDocumentP
     }
 
     private func selectApiRule(at row: Int) {
-        guard let ruleToEdit = viewModel.rule(at: row) else { return }
-        let editIndex = viewModel.allRules.firstIndex(where: { $0.urlPattern == ruleToEdit.urlPattern && $0.httpMethod == ruleToEdit.httpMethod })
-        showRewriteRuleEditor(existingRule: ruleToEdit, editIndex: editIndex)
+        guard !filteredRules.isEmpty else { return }
+        let ruleToEdit = filteredRules[row]
+        if let index = rewriteConfig.rules.firstIndex(where: { $0.urlPattern == ruleToEdit.urlPattern && $0.httpMethod == ruleToEdit.httpMethod }) {
+            showRewriteRuleEditor(existingRule: ruleToEdit, editIndex: index)
+        }
     }
 
     @objc private func addRuleTapped() {
@@ -378,33 +371,79 @@ final class ResponseModifierSettingsController: BaseTableController, UIDocumentP
     }
 
     private func performResetAll() {
-        viewModel.resetAll()
+        let resetConfig = ResponseBodyRewriteConfig(isEnabled: false, rules: [])
+        NetworkInjectionManager.shared.setRewriteConfig(resetConfig)
+        NetworkInjectionManager.shared.setRewriteAutoEnableOnRun(false)
+        NetworkInjectionManager.shared.setRewriteMultipleMatchEnabled(false)
+        NetworkInjectionManager.shared.setRewriteShortCircuitEnabled(true)
+        tableView.reloadData()
+        updateHeaderView()
     }
 
     @objc private func autoEnableToggleChanged(_ sender: UISwitch) {
-        viewModel.isAutoEnableOnRunEnabled = sender.isOn
+        NetworkInjectionManager.shared.setRewriteAutoEnableOnRun(sender.isOn)
     }
-
+    
     @objc private func shortCircuitToggleChanged(_ sender: UISwitch) {
-        viewModel.isShortCircuitEnabled = sender.isOn
+        NetworkInjectionManager.shared.setRewriteShortCircuitEnabled(sender.isOn)
     }
 
     @objc private func multipleMatchToggleChanged(_ sender: UISwitch) {
-        viewModel.isMultipleMatchEnabled = sender.isOn
+        NetworkInjectionManager.shared.setRewriteMultipleMatchEnabled(sender.isOn)
     }
-
+    
     private func showInfoAlert(title: String, message: String) {
         let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "OK", style: .default))
         present(alert, animated: true)
     }
 
+    @objc private func ruleToggleChanged(_ sender: UISwitch) {
+        let rules = filteredRules
+        guard rules.indices.contains(sender.tag) else { return }
+        let rule = rules[sender.tag]
+        
+        var config = rewriteConfig
+        if let index = config.rules.firstIndex(where: { $0.urlPattern == rule.urlPattern && $0.httpMethod == rule.httpMethod }) {
+            config.rules[index].isEnabled = sender.isOn
+            NetworkInjectionManager.shared.setRewriteConfig(config)
+            updateHeaderView()
+        }
+    }
+
+    private func updateRewriteRules(_ rules: [ResponseBodyRewriteRule]) {
+        var config = rewriteConfig
+        config.rules = rules
+        NetworkInjectionManager.shared.setRewriteConfig(config)
+        updateHeaderView()
+    }
+
+    private func enabledRuleCountSummary() -> String {
+        let rules = rewriteConfig.rules
+        let enabledCount = rules.filter(\.isEnabled).count
+        return "\(enabledCount)/\(rules.count)"
+    }
+
+    private func areAllRulesEnabled() -> Bool {
+        let rules = rewriteConfig.rules
+        return !rules.isEmpty && rules.allSatisfy(\.isEnabled)
+    }
+
     @objc private func allRulesToggleChanged(_ sender: UISwitch) {
+        setAllRulesEnabled(sender.isOn)
+    }
+
+    private func setAllRulesEnabled(_ isEnabled: Bool) {
         let loading = UIAlertController(title: nil, message: "Updating rules...", preferredStyle: .alert)
         present(loading, animated: true)
 
-        viewModel.setAllRulesEnabled(sender.isOn)
-
+        var config = rewriteConfig
+        config.rules = config.rules.map {
+            var rule = $0
+            rule.isEnabled = isEnabled
+            return rule
+        }
+        NetworkInjectionManager.shared.setRewriteConfig(config)
         DispatchQueue.main.async { [weak self] in
             loading.dismiss(animated: true) {
                 self?.tableView.reloadData()
@@ -423,39 +462,66 @@ final class ResponseModifierSettingsController: BaseTableController, UIDocumentP
         })
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
         if let popover = alert.popoverPresentationController {
-            popover.sourceView = tableView
-            let rect = tableView.rectForRow(at: IndexPath(row: 0, section: Section.data.rawValue))
-            popover.sourceRect = rect
+            if let cell = tableView.cellForRow(at: IndexPath(row: 0, section: Section.data.rawValue)) {
+                popover.sourceView = cell
+                popover.sourceRect = cell.bounds
+            } else {
+                popover.sourceView = view
+                popover.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.midY, width: 0, height: 0)
+                popover.permittedArrowDirections = []
+            }
         }
         present(alert, animated: true)
     }
 
     private func showRewriteRuleEditor(existingRule: ResponseBodyRewriteRule? = nil, editIndex: Int? = nil) {
         let editor = RewriteRuleEditViewController(rule: existingRule) { [weak self] updatedRule in
-            self?.viewModel.saveRule(updatedRule, editIndex: editIndex)
+            guard let self = self else { return }
+            var updatedRules = self.rewriteConfig.rules
+            if let editIndex {
+                updatedRules[editIndex] = updatedRule
+            } else if let existingIndex = updatedRules.firstIndex(where: { $0.urlPattern == updatedRule.urlPattern && $0.httpMethod == updatedRule.httpMethod }) {
+                updatedRules[existingIndex] = updatedRule
+            } else {
+                updatedRules.append(updatedRule)
+            }
+            self.updateRewriteRules(updatedRules)
+            self.tableView.reloadData()
+            self.updateHeaderView()
         }
         navigationController?.pushViewController(editor, animated: true)
     }
 
     override func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
-        guard viewModel.isSearching || Section(rawValue: indexPath.section) == .apiRules else { return nil }
+        guard isSearching || Section(rawValue: indexPath.section) == .apiRules else { return nil }
         return deleteSwipeAction(for: indexPath.row)
     }
 
     private func deleteSwipeAction(for row: Int) -> UISwipeActionsConfiguration? {
-        guard !viewModel.filteredRules.isEmpty else { return nil }
+        guard !filteredRules.isEmpty else { return nil }
         let deleteAction = UIContextualAction(style: .destructive, title: "Delete") { [weak self] _, _, completion in
-            self?.viewModel.deleteRule(at: row)
+            guard let self = self else { return }
+            let ruleToDelete = self.filteredRules[row]
+            var updatedRules = self.rewriteConfig.rules
+            if let index = updatedRules.firstIndex(where: { $0.urlPattern == ruleToDelete.urlPattern && $0.httpMethod == ruleToDelete.httpMethod }) {
+                updatedRules.remove(at: index)
+                self.updateRewriteRules(updatedRules)
+                self.tableView.reloadData()
+            }
             completion(true)
         }
         return UISwipeActionsConfiguration(actions: [deleteAction])
     }
 
     private func exportRewriteRulesCSV() {
-        guard let export = viewModel.exportCSVData() else { return }
-        let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent(export.fileName)
+        let csv = RewriteRulesCSV.export(rules: rewriteConfig.rules)
+        guard let data = csv.data(using: .utf8) else { return }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyyMMdd_HHmmss"
+        let fileName = "response_modifier_rules_\(formatter.string(from: Date())).csv"
+        let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
         do {
-            try export.data.write(to: fileURL, options: [.atomic])
+            try data.write(to: fileURL, options: [.atomic])
         } catch {
             showMessageAlert(title: "Export Error", message: error.localizedDescription)
             return
@@ -500,7 +566,7 @@ final class ResponseModifierSettingsController: BaseTableController, UIDocumentP
                 throw NSError(domain: "DebugSwift.NetworkInjection", code: 1, userInfo: [NSLocalizedDescriptionKey: "CSV file must be UTF-8 encoded."])
             }
             let importedRules = try RewriteRulesCSV.parse(csvText)
-            let merged = viewModel.applyImportedRules(importedRules)
+            let merged = applyImportedRewriteRules(importedRules)
             showMessageAlert(title: "Import Complete", message: "Created \(merged.created) rule(s), updated \(merged.updated) rule(s).")
         } catch {
             showMessageAlert(title: "Import Error", message: error.localizedDescription)
@@ -508,6 +574,26 @@ final class ResponseModifierSettingsController: BaseTableController, UIDocumentP
     }
 
     func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {}
+
+    private func applyImportedRewriteRules(_ importedRules: [ResponseBodyRewriteRule]) -> (created: Int, updated: Int) {
+        var mergedRules = rewriteConfig.rules
+        var created = 0
+        var updated = 0
+        for importedRule in importedRules {
+            if let existingIndex = mergedRules.firstIndex(where: { $0.urlPattern == importedRule.urlPattern && $0.httpMethod == importedRule.httpMethod }) {
+                mergedRules[existingIndex].responseBody = importedRule.responseBody
+                mergedRules[existingIndex].responseStatusCode = importedRule.responseStatusCode
+                mergedRules[existingIndex].httpMethod = importedRule.httpMethod
+                updated += 1
+            } else {
+                mergedRules.append(importedRule)
+                created += 1
+            }
+        }
+        updateRewriteRules(mergedRules)
+        tableView.reloadData()
+        return (created, updated)
+    }
 
     private func showMessageAlert(title: String, message: String) {
         let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
@@ -518,6 +604,8 @@ final class ResponseModifierSettingsController: BaseTableController, UIDocumentP
 
 extension ResponseModifierSettingsController: UISearchResultsUpdating {
     func updateSearchResults(for searchController: UISearchController) {
-        viewModel.updateSearch(text: searchController.searchBar.text ?? "")
+        searchText = searchController.searchBar.text ?? ""
+        updateHeaderView()
+        tableView.reloadData()
     }
 }
